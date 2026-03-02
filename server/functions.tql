@@ -1,0 +1,143 @@
+define
+
+# Simple user check function
+fun user_exists($email: string) -> boolean:
+  match
+    $u isa user, has email == $email;
+  return check;
+
+# Check if subject and object belong to same tenant
+fun same_tenant($s: subject, $o: object_) -> boolean:
+  match
+    contains (parent: $company, child: $s);
+    contains (parent: $company, child: $o);
+    $company isa company;
+  return check;
+
+# Check for deny permissions (with group expansion)
+fun has_deny($s: subject, $o: object_, $a: string) -> boolean:
+  match
+    {
+      (subject: $s, object: $o) isa permission,
+        has action == $a,
+        has effect == "deny";
+    } or {
+      membership (member: $s, group: $g1);
+      (subject: $g1, object: $o) isa permission,
+        has action == $a,
+        has effect == "deny";
+    } or {
+      (subject: $s, object: $o, assigned_role: $r);
+      (granted_role: $r) isa role_permission,
+        has action == $a,
+        has effect == "deny";
+    };
+  return check;
+
+# Check for allow permissions (with group expansion)
+fun has_allow($s: subject, $o: object_, $a: string) -> boolean:
+  match
+    {
+      (subject: $s, object: $o) isa permission,
+        has action == $a,
+        has effect == "allow";
+    } or {
+      membership (member: $s, group: $g2);
+      (subject: $g2, object: $o) isa permission,
+        has action == $a,
+        has effect == "allow";
+    } or {
+      (subject: $s, object: $o, assigned_role: $r2);
+      (granted_role: $r2) isa role_permission,
+        has action == $a,
+        has effect == "allow";
+    };
+  return check;
+
+# Check for deny permissions with inheritance (object + parent)
+fun has_deny_inherited($s: subject, $o: object_, $a: string) -> boolean:
+  match
+    {
+      # Direct deny on object
+      (subject: $s, object: $o) isa permission,
+        has action == $a,
+        has effect == "deny";
+    } or {
+      # Group deny on object
+      membership (member: $s, group: $g3);
+      (subject: $g3, object: $o) isa permission,
+        has action == $a,
+        has effect == "deny";
+    } or {
+      # Role deny on object
+      (subject: $s, object: $o, assigned_role: $r3) isa role_assignment;
+      (granted_role: $r3) isa role_permission,
+        has action == $a,
+        has effect == "deny";
+    } or {
+      # Inherited deny from parent object
+      contains (parent: $parent1, child: $o);
+      $parent1 isa object_;
+      (subject: $s, object: $parent1) isa permission,
+        has action == $a,
+        has effect == "deny";
+    } or {
+      # Inherited group deny from parent object
+      contains (parent: $parent2, child: $o);
+      $parent2 isa object_;
+      membership (member: $s, group: $g4);
+      (subject: $g4, object: $parent2) isa permission,
+        has action == $a,
+        has effect == "deny";
+    };
+  return check;
+
+# Check for allow permissions with inheritance (object + parent)
+fun has_allow_inherited($s: subject, $o: object_, $a: string) -> boolean:
+  match
+    {
+      # Direct allow on object
+      (subject: $s, object: $o) isa permission,
+        has action == $a,
+        has effect == "allow";
+    } or {
+      # Group allow on object
+      membership (member: $s, group: $g5);
+      (subject: $g5, object: $o) isa permission,
+        has action == $a,
+        has effect == "allow";
+    } or {
+      # Role allow on object
+      (subject: $s, object: $o, assigned_role: $r4) isa role_assignment;
+      (granted_role: $r4) isa role_permission,
+        has action == $a,
+        has effect == "allow";
+    } or {
+      # Inherited allow from parent object
+      contains (parent: $parent3, child: $o);
+      $parent3 isa object_;
+      (subject: $s, object: $parent3) isa permission,
+        has action == $a,
+        has effect == "allow";
+    } or {
+      # Inherited group allow from parent object
+      contains (parent: $parent4, child: $o);
+      $parent4 isa object_;
+      membership (member: $s, group: $g6);
+      (subject: $g6, object: $parent4) isa permission,
+        has action == $a,
+        has effect == "allow";
+    };
+  return check;
+
+# Complete access control with tenant boundaries and inheritance
+fun can_access_tenant_inherited($s: subject, $o: object_, $a: string) -> boolean:
+  match
+    let $tenant_ok in same_tenant($s, $o);
+    let $has_allow in has_allow_inherited($s, $o, $a);
+    let $has_deny in has_deny_inherited($s, $o, $a);
+    
+    $tenant_ok == true;
+    $has_allow == true;
+    $has_deny == false;
+  return check;

@@ -1,0 +1,135 @@
+define
+
+  ############################
+  # Attributes
+  ############################
+
+  attribute email, value string;
+  attribute password, value string;
+  attribute company_domain, value string;
+  attribute first_name, value string;
+  attribute last_name, value string;
+
+  attribute created_at, value datetime;
+  attribute updated_at, value datetime;
+  attribute deleted_at, value datetime;
+  attribute is_deleted, value boolean;
+
+  # IAM-related
+  attribute name, value string;
+  attribute action, value string;                     # e.g. "read", "write", "admin"
+  attribute effect, value string @values("allow", "deny");
+
+  ############################
+  # Core entity types
+  ############################
+
+  # Concept markers (semantics are expressed via roles in relations)
+  entity record @abstract;
+  entity subject @abstract;
+  entity object_ @abstract;
+
+  # Subjects (principals)
+  entity user sub subject,
+    owns email @key,
+    owns password,
+    owns first_name,
+    owns last_name;
+
+  entity company sub subject,
+    owns company_domain @key;
+
+  entity group sub subject,
+    owns name @key;
+
+  # Objects (resources)
+  entity resource sub object_,
+    owns name @card(1..1);
+
+  ############################
+  # Record metadata (composition)
+  ############################
+
+  relation recorded,
+    relates item,
+    owns created_at @card(1..1),
+    owns updated_at @card(0..1),
+    owns deleted_at @card(0..1),
+    owns is_deleted @card(1..1);
+
+  user plays recorded:item;
+  company plays recorded:item;
+  group plays recorded:item;
+  resource plays recorded:item;
+
+  ############################
+  # Flexible IAM
+  ############################
+
+  # Direct permission: subject -> object with action + effect (allow/deny)
+  relation permission,
+    relates subject,
+    relates object,
+    owns action @card(1..1),
+    owns effect @card(1..1);
+
+  user plays permission:subject;
+  company plays permission:subject;
+  group plays permission:subject;
+
+  resource plays permission:object;
+  company plays permission:object;        # optional: company can be a protected resource too
+
+  # RBAC roles (NOTE: cannot use 'role' as an identifier; use iam_role)
+  entity iam_role,
+    owns name @key;
+
+  # Assign a role to a subject on an object
+  relation role_assignment,
+    relates subject,
+    relates object,
+    relates assigned_role;
+
+  user plays role_assignment:subject;
+  company plays role_assignment:subject;
+  group plays role_assignment:subject;
+
+  resource plays role_assignment:object;
+  company plays role_assignment:object;
+
+  iam_role plays role_assignment:assigned_role;
+
+  # Role implies permissions (action + effect)
+  # NOTE: cannot name the relates-role "role" (reserved), so use granted_role
+  relation role_permission,
+    relates granted_role,
+    owns action @card(1..1),
+    owns effect @card(1..1);
+
+  iam_role plays role_permission:granted_role;
+
+  ############################
+  # Group membership (supports nested groups)
+  ############################
+
+  relation membership,
+    relates member,
+    relates group;
+
+  user plays membership:member;
+  group plays membership:member;   # nested groups
+  group plays membership:group;
+
+  ############################
+  # Resource hierarchy (for optional inheritance in app logic / future functions)
+  ############################
+
+  relation contains,
+    relates parent,
+    relates child;
+
+  company plays contains:parent;
+  resource plays contains:parent;
+
+  company plays contains:child;
+  resource plays contains:child;
