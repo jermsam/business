@@ -27,7 +27,7 @@ fun has_deny($s: subject, $o: object_, $a: string) -> boolean:
         has action == $a,
         has effect == "deny";
     } or {
-      (subject: $s, object: $o, assigned_role: $r);
+      (subject: $s, object: $o, assigned_role: $r) isa role_assignment;
       (granted_role: $r) isa role_permission,
         has action == $a,
         has effect == "deny";

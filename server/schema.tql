@@ -19,6 +19,7 @@ define
   attribute name, value string;
   attribute action, value string;                     # e.g. "read", "write", "admin"
   attribute effect, value string @values("allow", "deny");
+  attribute expires_at, value datetime;
 
   ############################
   # Core entity types
@@ -71,7 +72,8 @@ define
     relates subject,
     relates object,
     owns action @card(1..1),
-    owns effect @card(1..1);
+    owns effect @card(1..1),
+    owns expires_at @card(0..1);
 
   user plays permission:subject;
   company plays permission:subject;
@@ -88,7 +90,8 @@ define
   relation role_assignment,
     relates subject,
     relates object,
-    relates assigned_role;
+    relates assigned_role,
+    owns expires_at @card(0..1);
 
   user plays role_assignment:subject;
   company plays role_assignment:subject;
@@ -114,7 +117,8 @@ define
 
   relation membership,
     relates member,
-    relates group;
+    relates group,
+    owns expires_at @card(0..1);
 
   user plays membership:member;
   group plays membership:member;   # nested groups
