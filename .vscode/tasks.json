@@ -2,13 +2,37 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "cargo build",
             "type": "cargo",
             "command": "build",
-            "problemMatcher": ["$rustc"],
+            "problemMatcher": [
+                "$rustc"
+            ],
             "group": "build",
+            "label": "cargo build",
             "options": {
                 "cwd": "${workspaceRoot}/server"
+            }
+        },
+        {
+            "type": "shell",
+            "command": "cargo",
+            "args": ["fmt"],
+            "group": "build",
+            "label": "cargo fmt",
+            "options": {
+                "cwd": "${workspaceFolder}/server"
+            }
+        },
+        {
+            "label": "cargo fmt and build",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "cargo fmt",
+                "cargo build"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
             }
         }
     ]

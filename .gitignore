@@ -1,15 +1,17 @@
 # Rust
 /target/
+**/target/
 **/*.rs.bk
 *.pdb
 
 # Cargo
 Cargo.lock
 
-# IDE
+# VS Code configuration (exclude by default but include specific files)
 .vscode/
 !.vscode/launch.json
 !.vscode/tasks.json
+!.vscode/settings.json
 .idea/
 *.swp
 *.swo

@@ -16,7 +16,6 @@ where
         _username: &str,
         _ctx: &mut HookContext<Value, P>,
     ) -> anyhow::Result<Option<Value>> {
-       
         // // Example: call a custom method on your users service.
         // let users = ctx.services.service::<Value, P>("accounts")?;
         // // TypeDB query: find one user by email and fetch all its attributes.
@@ -98,7 +97,7 @@ where
         // println!("[TypeDbUserResolver] resolved user: {:?}", user);
 
         // Ok(Some(user))
-        
+
         Ok(Some(serde_json::json!({})))
     }
 }
@@ -106,10 +105,8 @@ where
 pub(crate) fn register_local<P: Send + Clone + 'static>(
     auth: Arc<AuthenticationService<P>>,
 ) -> Arc<LocalStrategy<P>> {
-    let strategy = Arc::new(
-        LocalStrategy::new(&auth.base)
-            .with_entity_resolver(Arc::new(TypeDbUserResolver)),
-    );
+    let strategy =
+        Arc::new(LocalStrategy::new(&auth.base).with_entity_resolver(Arc::new(TypeDbUserResolver)));
     let strategy_trait: Arc<dyn AuthenticationStrategy<P>> =
         Arc::clone(&strategy) as Arc<dyn AuthenticationStrategy<P>>;
     auth.register_strategy("local", strategy_trait);

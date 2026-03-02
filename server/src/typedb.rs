@@ -14,7 +14,7 @@ pub struct TypeDBState {
 }
 
 impl TypeDBState {
-    pub async fn new(app: &DogApp<Value, BusinessParams>) -> Result<()> {
+    pub async fn initialize(app: &DogApp<Value, BusinessParams>) -> Result<()> {
         let addr: String = app.get("typedb.addr").unwrap();
         let database: String = app.get("typedb.db").unwrap();
         let username: String = app.get("typedb.username").unwrap();
@@ -32,8 +32,18 @@ impl TypeDBState {
         } else {
             println!("TypeDB database '{}' already exists", database);
         }
-        let schema_paths = ["schema.tql", "functions.tql"];
+        // Load schema first
+        let schema_paths = ["schema.tql"];
         load_schema_from_file(&driver, &database, &schema_paths).await?;
+        
+        // Load functions with error handling for existing functions
+        match load_schema_from_file(&driver, &database, &["functions.tql"]).await {
+            Ok(_) => println!("Successfully loaded functions.tql"),
+            Err(e) if e.to_string().contains("already exists") => {
+                println!("Functions already exist, skipping function reload");
+            }
+            Err(e) => return Err(e),
+        }
         let state = Arc::new(Self { driver, database });
         app.set("typedb", state);
         Ok(())

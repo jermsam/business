@@ -5,7 +5,6 @@ use serde_json::Value;
 use std::env;
 
 pub fn config(app: &DogApp<Value, BusinessParams>) -> Result<()> {
-
     config_http(app)?;
     config_typedb(app)?;
     configure_auth(app)

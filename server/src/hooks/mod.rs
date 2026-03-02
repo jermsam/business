@@ -1,10 +1,9 @@
-use std::sync::Arc;
+use crate::services::BusinessParams;
 use anyhow::Result;
 use async_trait::async_trait;
-use dog_core::{DogApp, DogAfterHook, HookContext};
+use dog_core::{DogAfterHook, DogApp, HookContext};
 use serde_json::Value;
-use crate::services::BusinessParams;
-
+use std::sync::Arc;
 
 pub struct AfterRead;
 
@@ -15,7 +14,7 @@ impl DogAfterHook<Value, BusinessParams> for AfterRead {
     }
 }
 
-pub fn global_hook (app: &DogApp<Value, BusinessParams>) -> Result<()>{
+pub fn global_hook(app: &DogApp<Value, BusinessParams>) -> Result<()> {
     // Global hooks run at the app level, before any service-specific hooks
     // The issue: before_all runs BEFORE authentication
     // Solution: We need service-level hooks that run AFTER auth

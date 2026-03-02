@@ -1,14 +1,14 @@
-use std::sync::Arc;
-use dog_core::DogApp;
-use serde_json::Value;
 use crate::services::BusinessParams;
 use anyhow::Result;
 use dog_auth::{AuthOptions, AuthStrategy, AuthenticationService};
 use dog_auth_local::LocalStrategy;
+use dog_core::DogApp;
+use serde_json::Value;
+use std::sync::Arc;
 
+pub mod authorization;
 pub mod jwt;
 pub mod local;
-pub mod authorization;
 
 pub fn strategies(dog_app: &DogApp<Value, BusinessParams>) -> Result<()> {
     let mut opts = AuthOptions::default();

@@ -11,7 +11,7 @@
             "program": "${workspaceRoot}/server/target/debug/server",
             "args": [],
             "cwd": "${workspaceRoot}/server",
-            "preLaunchTask": "cargo build"
+            "preLaunchTask": "cargo fmt and build"
         }
     ]
 }
