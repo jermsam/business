@@ -35,7 +35,7 @@ impl TypeDBState {
         // Load schema first
         let schema_paths = ["schema.tql"];
         load_schema_from_file(&driver, &database, &schema_paths).await?;
-        
+
         // Load functions with error handling for existing functions
         match load_schema_from_file(&driver, &database, &["functions.tql"]).await {
             Ok(_) => println!("Successfully loaded functions.tql"),
