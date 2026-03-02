@@ -24,11 +24,16 @@ fn config_typedb(app: &DogApp<Value, BusinessParams>) -> Result<()> {
     let username = env::var("TYPEDB_USERNAME")?;
     let password = env::var("TYPEDB_PASSWORD")?;
     let tls = env::var("TYPEDB_TLS").unwrap_or("false".to_string());
+    let environment = env::var("ENVIRONMENT").unwrap_or("development".to_string());
+    let force_recreate = env::var("TYPEDB_FORCE_RECREATE").unwrap_or("false".to_string());
+
     app.set("typedb.addr", addr);
     app.set("typedb.db", db);
     app.set("typedb.username", username);
     app.set("typedb.password", password);
     app.set("typedb.tls", tls);
+    app.set("typedb.environment", environment);
+    app.set("typedb.force_recreate", force_recreate);
     Ok(())
 }
 
