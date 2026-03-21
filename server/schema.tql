@@ -17,7 +17,7 @@ define
 
   # IAM-related
   attribute name, value string;
-  attribute action, value string;                     # e.g. "read", "write", "admin"
+  attribute action, value string;
   attribute effect, value string @values("allow", "deny");
   attribute expires_at, value datetime;
 
@@ -25,11 +25,9 @@ define
   # Core entity types
   ############################
 
-  # Concept markers (semantics are expressed via roles in relations)
   entity subject @abstract;
   entity object_ @abstract;
 
-  # Subjects (principals)
   entity user sub subject,
     owns email @key,
     owns password,
@@ -42,12 +40,11 @@ define
   entity group sub subject,
     owns name @key;
 
-  # Objects (resources)
   entity resource sub object_,
     owns name @card(1..1);
 
   ############################
-  # Record metadata (composition)
+  # Record metadata
   ############################
 
   relation recorded,
@@ -66,7 +63,6 @@ define
   # Flexible IAM
   ############################
 
-  # Direct permission: subject -> object with action + effect (allow/deny)
   relation permission,
     relates subject,
     relates object,
@@ -80,11 +76,9 @@ define
 
   resource plays permission:object;
 
-  # RBAC roles (NOTE: cannot use 'role' as an identifier; use iam_role)
   entity iam_role,
     owns name @key;
 
-  # Assign a role to a subject on an object
   relation role_assignment,
     relates subject,
     relates object,
@@ -99,8 +93,6 @@ define
 
   iam_role plays role_assignment:assigned_role;
 
-  # Role implies permissions (action + effect)
-  # NOTE: cannot name the relates-role "role" (reserved), so use granted_role
   relation role_permission,
     relates granted_role,
     owns action @card(1..1),
@@ -109,7 +101,7 @@ define
   iam_role plays role_permission:granted_role;
 
   ############################
-  # Company/workspace admin RBAC (separate policy surface)
+  # Company/workspace admin RBAC
   ############################
 
   entity tenant_role,
@@ -145,11 +137,11 @@ define
     owns expires_at @card(0..1);
 
   user plays membership:member;
-  group plays membership:member;   # nested groups
+  group plays membership:member;
   group plays membership:group;
 
   ############################
-  # Tenant membership (separate from hierarchy)
+  # Tenant membership
   ############################
 
   relation tenant_membership,
@@ -163,7 +155,7 @@ define
   resource plays tenant_membership:member;
 
   ############################
-  # Resource hierarchy (for optional inheritance in app logic / future functions)
+  # Resource hierarchy
   ############################
 
   relation contains,
@@ -180,17 +172,3 @@ define
   resource plays ancestor:ancestor;
   resource plays ancestor:descendant;
 
-  rule contains_is_ancestor:
-  when {
-    (parent: $p, child: $c) isa contains;
-  } then {
-    (ancestor: $p, descendant: $c) isa ancestor;
-  };
-
-  rule ancestor_transitive:
-  when {
-    (ancestor: $a, descendant: $b) isa ancestor;
-    (parent: $b, child: $c) isa contains;
-  } then {
-    (ancestor: $a, descendant: $c) isa ancestor;
-  };
