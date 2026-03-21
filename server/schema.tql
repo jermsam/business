@@ -26,7 +26,6 @@ define
   ############################
 
   # Concept markers (semantics are expressed via roles in relations)
-  entity record @abstract;
   entity subject @abstract;
   entity object_ @abstract;
 
