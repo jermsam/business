@@ -80,7 +80,6 @@ define
   group plays permission:subject;
 
   resource plays permission:object;
-  company plays permission:object;        # optional: company can be a protected resource too
 
   # RBAC roles (NOTE: cannot use 'role' as an identifier; use iam_role)
   entity iam_role,
@@ -98,7 +97,6 @@ define
   group plays role_assignment:subject;
 
   resource plays role_assignment:object;
-  company plays role_assignment:object;
 
   iam_role plays role_assignment:assigned_role;
 
@@ -110,6 +108,33 @@ define
     owns effect @card(1..1);
 
   iam_role plays role_permission:granted_role;
+
+  ############################
+  # Company/workspace admin RBAC (separate policy surface)
+  ############################
+
+  entity tenant_role,
+    owns name @key;
+
+  relation tenant_role_assignment,
+    relates tenant,
+    relates subject,
+    relates assigned_role,
+    owns expires_at @card(0..1);
+
+  company plays tenant_role_assignment:tenant;
+
+  user plays tenant_role_assignment:subject;
+  group plays tenant_role_assignment:subject;
+
+  tenant_role plays tenant_role_assignment:assigned_role;
+
+  relation tenant_role_permission,
+    relates granted_role,
+    owns action @card(1..1),
+    owns effect @card(1..1);
+
+  tenant_role plays tenant_role_permission:granted_role;
 
   ############################
   # Group membership (supports nested groups)
@@ -125,6 +150,20 @@ define
   group plays membership:group;
 
   ############################
+  # Tenant membership (separate from hierarchy)
+  ############################
+
+  relation tenant_membership,
+    relates tenant,
+    relates member;
+
+  company plays tenant_membership:tenant;
+
+  user plays tenant_membership:member;
+  group plays tenant_membership:member;
+  resource plays tenant_membership:member;
+
+  ############################
   # Resource hierarchy (for optional inheritance in app logic / future functions)
   ############################
 
@@ -132,8 +171,27 @@ define
     relates parent,
     relates child;
 
-  company plays contains:parent;
   resource plays contains:parent;
-
-  company plays contains:child;
   resource plays contains:child;
+
+  relation ancestor,
+    relates ancestor,
+    relates descendant;
+
+  resource plays ancestor:ancestor;
+  resource plays ancestor:descendant;
+
+  rule contains_is_ancestor:
+  when {
+    (parent: $p, child: $c) isa contains;
+  } then {
+    (ancestor: $p, descendant: $c) isa ancestor;
+  };
+
+  rule ancestor_transitive:
+  when {
+    (ancestor: $a, descendant: $b) isa ancestor;
+    (parent: $b, child: $c) isa contains;
+  } then {
+    (ancestor: $a, descendant: $c) isa ancestor;
+  };

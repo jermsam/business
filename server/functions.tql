@@ -6,138 +6,327 @@ fun user_exists($email: string) -> boolean:
     $u isa user, has email == $email;
   return check;
 
+fun permission_active($p: permission, $now: datetime) -> boolean:
+  match
+    { not { $p has expires_at $e; }; } or { $p has expires_at $e; $e > $now; };
+  return check;
+
+fun membership_active($m: membership, $now: datetime) -> boolean:
+  match
+    { not { $m has expires_at $e; }; } or { $m has expires_at $e; $e > $now; };
+  return check;
+
+fun role_assignment_active($ra: role_assignment, $now: datetime) -> boolean:
+  match
+    { not { $ra has expires_at $e; }; } or { $ra has expires_at $e; $e > $now; };
+  return check;
+
+fun tenant_role_assignment_active($tra: tenant_role_assignment, $now: datetime) -> boolean:
+  match
+    { not { $tra has expires_at $e; }; } or { $tra has expires_at $e; $e > $now; };
+  return check;
+
 # Check if subject and object belong to same tenant
 fun same_tenant($s: subject, $o: object_) -> boolean:
   match
-    contains (parent: $company, child: $s);
-    contains (parent: $company, child: $o);
+    (tenant: $company, member: $s) isa tenant_membership;
+    (tenant: $company, member: $o) isa tenant_membership;
     $company isa company;
   return check;
 
 # Check for deny permissions (with group expansion)
-fun has_deny($s: subject, $o: object_, $a: string) -> boolean:
+fun has_deny($s: subject, $o: object_, $a: string, $now: datetime) -> boolean:
   match
     {
-      (subject: $s, object: $o) isa permission,
-        has action == $a,
-        has effect == "deny";
+      $p (subject: $s, object: $o) isa permission;
+      $p has action $act;
+      $act == $a;
+      $p has effect $eff;
+      $eff == "deny";
+      let $p_ok in permission_active($p, $now);
+      $p_ok == true;
     } or {
-      membership (member: $s, group: $g1);
-      (subject: $g1, object: $o) isa permission,
-        has action == $a,
-        has effect == "deny";
+      $m (member: $s, group: $g1) isa membership;
+      $p2 (subject: $g1, object: $o) isa permission;
+      $p2 has action $act2;
+      $act2 == $a;
+      $p2 has effect $eff2;
+      $eff2 == "deny";
+
+      let $m_ok in membership_active($m, $now);
+      $m_ok == true;
+      let $p2_ok in permission_active($p2, $now);
+      $p2_ok == true;
     } or {
-      (subject: $s, object: $o, assigned_role: $r) isa role_assignment;
+      $ra (subject: $s, object: $o, assigned_role: $r) isa role_assignment;
+      let $ra_ok in role_assignment_active($ra, $now);
+      $ra_ok == true;
       (granted_role: $r) isa role_permission,
-        has action == $a,
-        has effect == "deny";
+        has action $act3,
+        has effect $eff3;
+      $act3 == $a;
+      $eff3 == "deny";
     };
   return check;
 
 # Check for allow permissions (with group expansion)
-fun has_allow($s: subject, $o: object_, $a: string) -> boolean:
+fun has_allow($s: subject, $o: object_, $a: string, $now: datetime) -> boolean:
   match
     {
-      (subject: $s, object: $o) isa permission,
-        has action == $a,
-        has effect == "allow";
+      $p (subject: $s, object: $o) isa permission;
+      $p has action $act;
+      $act == $a;
+      $p has effect $eff;
+      $eff == "allow";
+      let $p_ok in permission_active($p, $now);
+      $p_ok == true;
     } or {
-      membership (member: $s, group: $g2);
-      (subject: $g2, object: $o) isa permission,
-        has action == $a,
-        has effect == "allow";
+      $m (member: $s, group: $g2) isa membership;
+      $p2 (subject: $g2, object: $o) isa permission;
+      $p2 has action $act2;
+      $act2 == $a;
+      $p2 has effect $eff2;
+      $eff2 == "allow";
+      let $m_ok in membership_active($m, $now);
+      $m_ok == true;
+      let $p2_ok in permission_active($p2, $now);
+      $p2_ok == true;
     } or {
-      (subject: $s, object: $o, assigned_role: $r2);
+      $ra (subject: $s, object: $o, assigned_role: $r2) isa role_assignment;
+      let $ra_ok in role_assignment_active($ra, $now);
+      $ra_ok == true;
       (granted_role: $r2) isa role_permission,
-        has action == $a,
-        has effect == "allow";
+        has action $act3,
+        has effect $eff3;
+      $act3 == $a;
+      $eff3 == "allow";
     };
   return check;
 
 # Check for deny permissions with inheritance (object + parent)
-fun has_deny_inherited($s: subject, $o: object_, $a: string) -> boolean:
+fun has_deny_inherited($s: subject, $o: object_, $a: string, $now: datetime) -> boolean:
   match
     {
       # Direct deny on object
-      (subject: $s, object: $o) isa permission,
-        has action == $a,
-        has effect == "deny";
+      $p (subject: $s, object: $o) isa permission;
+      $p has action $act;
+      $act == $a;
+      $p has effect $eff;
+      $eff == "deny";
+      let $p_ok in permission_active($p, $now);
+      $p_ok == true;
     } or {
       # Group deny on object
-      membership (member: $s, group: $g3);
-      (subject: $g3, object: $o) isa permission,
-        has action == $a,
-        has effect == "deny";
+      $m (member: $s, group: $g3) isa membership;
+      $p2 (subject: $g3, object: $o) isa permission;
+      $p2 has action $act2;
+      $act2 == $a;
+      $p2 has effect $eff2;
+      $eff2 == "deny";
+      let $m_ok in membership_active($m, $now);
+      $m_ok == true;
+      let $p2_ok in permission_active($p2, $now);
+      $p2_ok == true;
     } or {
       # Role deny on object
-      (subject: $s, object: $o, assigned_role: $r3) isa role_assignment;
+      $ra (subject: $s, object: $o, assigned_role: $r3) isa role_assignment;
+      let $ra_ok in role_assignment_active($ra, $now);
+      $ra_ok == true;
       (granted_role: $r3) isa role_permission,
-        has action == $a,
-        has effect == "deny";
+        has action $act3,
+        has effect $eff3;
+      $act3 == $a;
+      $eff3 == "deny";
     } or {
-      # Inherited deny from parent object
-      contains (parent: $parent1, child: $o);
+      # Inherited deny from any ancestor object
+      (ancestor: $parent1, descendant: $o) isa ancestor;
       $parent1 isa object_;
-      (subject: $s, object: $parent1) isa permission,
-        has action == $a,
-        has effect == "deny";
+      $p3 (subject: $s, object: $parent1) isa permission;
+      $p3 has action $act4;
+      $act4 == $a;
+      $p3 has effect $eff4;
+      $eff4 == "deny";
+      let $p3_ok in permission_active($p3, $now);
+      $p3_ok == true;
     } or {
-      # Inherited group deny from parent object
-      contains (parent: $parent2, child: $o);
+      # Inherited group deny from any ancestor object
+      (ancestor: $parent2, descendant: $o) isa ancestor;
       $parent2 isa object_;
-      membership (member: $s, group: $g4);
-      (subject: $g4, object: $parent2) isa permission,
-        has action == $a,
-        has effect == "deny";
+      $m2 (member: $s, group: $g4) isa membership;
+      $p4 (subject: $g4, object: $parent2) isa permission;
+      $p4 has action $act5;
+      $act5 == $a;
+      $p4 has effect $eff5;
+      $eff5 == "deny";
+      let $m2_ok in membership_active($m2, $now);
+      $m2_ok == true;
+      let $p4_ok in permission_active($p4, $now);
+      $p4_ok == true;
+    } or {
+      # Inherited role deny from any ancestor object
+      (ancestor: $parent5, descendant: $o) isa ancestor;
+      $parent5 isa object_;
+      $ra2 (subject: $s, object: $parent5, assigned_role: $r5) isa role_assignment;
+      let $ra2_ok in role_assignment_active($ra2, $now);
+      $ra2_ok == true;
+      (granted_role: $r5) isa role_permission,
+        has action $act6,
+        has effect $eff6;
+      $act6 == $a;
+      $eff6 == "deny";
     };
   return check;
 
 # Check for allow permissions with inheritance (object + parent)
-fun has_allow_inherited($s: subject, $o: object_, $a: string) -> boolean:
+fun has_allow_inherited($s: subject, $o: object_, $a: string, $now: datetime) -> boolean:
   match
     {
       # Direct allow on object
-      (subject: $s, object: $o) isa permission,
-        has action == $a,
-        has effect == "allow";
+      $p (subject: $s, object: $o) isa permission;
+      $p has action $act;
+      $act == $a;
+      $p has effect $eff;
+      $eff == "allow";
+      let $p_ok in permission_active($p, $now);
+      $p_ok == true;
     } or {
       # Group allow on object
-      membership (member: $s, group: $g5);
-      (subject: $g5, object: $o) isa permission,
-        has action == $a,
-        has effect == "allow";
+      $m (member: $s, group: $g5) isa membership;
+      $p2 (subject: $g5, object: $o) isa permission;
+      $p2 has action $act2;
+      $act2 == $a;
+      $p2 has effect $eff2;
+      $eff2 == "allow";
+      let $m_ok in membership_active($m, $now);
+      $m_ok == true;
+      let $p2_ok in permission_active($p2, $now);
+      $p2_ok == true;
     } or {
       # Role allow on object
-      (subject: $s, object: $o, assigned_role: $r4) isa role_assignment;
+      $ra (subject: $s, object: $o, assigned_role: $r4) isa role_assignment;
+      let $ra_ok in role_assignment_active($ra, $now);
+      $ra_ok == true;
       (granted_role: $r4) isa role_permission,
-        has action == $a,
-        has effect == "allow";
+        has action $act3,
+        has effect $eff3;
+      $act3 == $a;
+      $eff3 == "allow";
     } or {
-      # Inherited allow from parent object
-      contains (parent: $parent3, child: $o);
+      # Inherited allow from any ancestor object
+      (ancestor: $parent3, descendant: $o) isa ancestor;
       $parent3 isa object_;
-      (subject: $s, object: $parent3) isa permission,
-        has action == $a,
-        has effect == "allow";
+      $p3 (subject: $s, object: $parent3) isa permission;
+      $p3 has action $act4;
+      $act4 == $a;
+      $p3 has effect $eff4;
+      $eff4 == "allow";
+      let $p3_ok in permission_active($p3, $now);
+      $p3_ok == true;
     } or {
-      # Inherited group allow from parent object
-      contains (parent: $parent4, child: $o);
+      # Inherited group allow from any ancestor object
+      (ancestor: $parent4, descendant: $o) isa ancestor;
       $parent4 isa object_;
-      membership (member: $s, group: $g6);
-      (subject: $g6, object: $parent4) isa permission,
-        has action == $a,
-        has effect == "allow";
+      $m2 (member: $s, group: $g6) isa membership;
+      $p4 (subject: $g6, object: $parent4) isa permission;
+      $p4 has action $act5;
+      $act5 == $a;
+      $p4 has effect $eff5;
+      $eff5 == "allow";
+      let $m2_ok in membership_active($m2, $now);
+      $m2_ok == true;
+      let $p4_ok in permission_active($p4, $now);
+      $p4_ok == true;
+    } or {
+      # Inherited role allow from any ancestor object
+      (ancestor: $parent6, descendant: $o) isa ancestor;
+      $parent6 isa object_;
+      $ra2 (subject: $s, object: $parent6, assigned_role: $r6) isa role_assignment;
+      let $ra2_ok in role_assignment_active($ra2, $now);
+      $ra2_ok == true;
+      (granted_role: $r6) isa role_permission,
+        has action $act6,
+        has effect $eff6;
+      $act6 == $a;
+      $eff6 == "allow";
     };
   return check;
 
 # Complete access control with tenant boundaries and inheritance
-fun can_access_tenant_inherited($s: subject, $o: object_, $a: string) -> boolean:
+fun can_access_tenant_inherited($s: subject, $o: object_, $a: string, $now: datetime) -> boolean:
   match
     let $tenant_ok in same_tenant($s, $o);
-    let $has_allow in has_allow_inherited($s, $o, $a);
-    let $has_deny in has_deny_inherited($s, $o, $a);
+    let $has_allow in has_allow_inherited($s, $o, $a, $now);
+    let $has_deny in has_deny_inherited($s, $o, $a, $now);
     
     $tenant_ok == true;
+    $has_allow == true;
+    $has_deny == false;
+  return check;
+
+fun has_tenant_role_deny($s: subject, $c: company, $a: string, $now: datetime) -> boolean:
+  match
+    {
+      $tra (tenant: $c, subject: $s, assigned_role: $r) isa tenant_role_assignment;
+      let $tra_ok in tenant_role_assignment_active($tra, $now);
+      $tra_ok == true;
+
+      (granted_role: $r) isa tenant_role_permission,
+        has action $act,
+        has effect $eff;
+      $act == $a;
+      $eff == "deny";
+    } or {
+      $m (member: $s, group: $g) isa membership;
+      let $m_ok in membership_active($m, $now);
+      $m_ok == true;
+
+      $tra (tenant: $c, subject: $g, assigned_role: $r) isa tenant_role_assignment;
+      let $tra_ok in tenant_role_assignment_active($tra, $now);
+      $tra_ok == true;
+
+      (granted_role: $r) isa tenant_role_permission,
+        has action $act,
+        has effect $eff;
+      $act == $a;
+      $eff == "deny";
+    };
+  return check;
+
+fun has_tenant_role_allow($s: subject, $c: company, $a: string, $now: datetime) -> boolean:
+  match
+    {
+      $tra (tenant: $c, subject: $s, assigned_role: $r) isa tenant_role_assignment;
+      let $tra_ok in tenant_role_assignment_active($tra, $now);
+      $tra_ok == true;
+
+      (granted_role: $r) isa tenant_role_permission,
+        has action $act,
+        has effect $eff;
+      $act == $a;
+      $eff == "allow";
+    } or {
+      $m (member: $s, group: $g) isa membership;
+      let $m_ok in membership_active($m, $now);
+      $m_ok == true;
+
+      $tra (tenant: $c, subject: $g, assigned_role: $r) isa tenant_role_assignment;
+      let $tra_ok in tenant_role_assignment_active($tra, $now);
+      $tra_ok == true;
+
+      (granted_role: $r) isa tenant_role_permission,
+        has action $act,
+        has effect $eff;
+      $act == $a;
+      $eff == "allow";
+    };
+  return check;
+
+fun can_access_company($s: subject, $c: company, $a: string, $now: datetime) -> boolean:
+  match
+    (tenant: $c, member: $s) isa tenant_membership;
+    let $has_allow in has_tenant_role_allow($s, $c, $a, $now);
+    let $has_deny in has_tenant_role_deny($s, $c, $a, $now);
+
     $has_allow == true;
     $has_deny == false;
   return check;
