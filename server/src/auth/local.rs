@@ -17,29 +17,27 @@ where
         ctx: &mut HookContext<Value, P>,
     ) -> anyhow::Result<Option<Value>> {
         // Example: call a custom method on your users service.
-        let users = ctx.services.service::<Value, P>("accounts")?;
+        let subjects = ctx.services.service::<Value, P>("subjects")?;
         // TypeDB query: find one user by email and fetch all its attributes.
-        // This matches the working example:
-        // match
-        //   $u isa user, has email "...";
-        // fetch {
-        //   "u": { $u.* }
-        // };
         let query = format!(
             "match \
-              $u isa user, has email \"{}\"; \
-            fetch {{ \"u\": {{ $u.* }} }};",
+              let $user in find_user_by_email(\"{}\"); \
+            fetch {{ \"user\": {{
+                \"email\": $user.email,
+                \"first_name\": $user.first_name,
+                \"last_name\": $user.last_name
+                }} }};",
             username
         );
         let params = serde_json::json!({
             "query": query,
         });
 
-        let out = users
+        let out = subjects
             .custom(&ctx.tenant, "read", Some(params), ctx.params.clone())
             .await?;
 
-        // println!("!!! Raw TypeDB response: {:?}", out);
+        println!("!!! Raw TypeDB response: {:?}", out);
 
         // // The TypeDB adapter returns conceptDocuments for this fetch, with a shape like:
         // // { ok: { answers: [ { "u": { "id": "...", "email": "...",

@@ -11,12 +11,14 @@ pub mod jwt;
 pub mod local;
 
 pub fn strategies(dog_app: &DogApp<Value, BusinessParams>) -> Result<()> {
-    let mut opts = AuthOptions::default();
-    opts.strategies = vec![
-        AuthStrategy::Jwt,
-        // AuthStrategy::OAuth,
-        AuthStrategy::Custom("local".to_string()),
-    ];
+    let mut opts = AuthOptions {
+        strategies: vec![
+            AuthStrategy::Jwt,
+            // AuthStrategy::OAuth,
+            AuthStrategy::Custom("local".to_string()),
+        ],
+        ..AuthOptions::default()
+    };
 
     opts.jwt.secret = dog_app.get::<String>("auth.jwt.secret");
     opts.service = dog_app.get::<String>("auth.service");

@@ -6,6 +6,20 @@ fun user_exists($email_value: string) -> boolean:
     $e == $email_value;
   return check;
 
+fun find_user_by_email($email_value: string) -> { email, first_name, last_name }:
+  match
+    let $exists in user_exists($email_value);
+    $exists == true;
+
+    $u isa user, has email $e;
+    $e == $email_value;
+
+    $u has email $email;
+    try { $u has first_name $first_name; };
+    try { $u has last_name $last_name; };
+  return { $email, $first_name, $last_name };
+
+
 fun permission_active($p: permission, $now: datetime) -> boolean:
   match
     { not { $p has expires_at $x; }; }

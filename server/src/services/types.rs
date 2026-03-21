@@ -1,1 +1,4 @@
-pub type BusinessParams = dog_axum::params::RestParams;
+use dog_auth::hooks::AuthParams;
+use dog_axum::params::RestParams;
+
+pub type BusinessParams = AuthParams<RestParams>;

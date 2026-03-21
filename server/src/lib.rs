@@ -15,8 +15,11 @@ mod typedb;
 
 pub async fn build() -> Result<AxumApp<Value, BusinessParams>> {
     let axum_app = app::axum_app()?;
-    let _typedb_state = TypeDBState::initialize(axum_app.app.as_ref()).await?;
-    let _services = services::configure(axum_app.app.as_ref()).await?;
-    let axum_app = axum_app.service("/health", || async { "ok" });
+    TypeDBState::initialize(axum_app.app.as_ref()).await?;
+    let services = services::configure(axum_app.app.as_ref()).await?;
+    let axum_app = axum_app
+        .use_service("/authentication", services.auth_svc)
+        .use_service("/subjects", services.subjects)
+        .service("/health", || async { "ok" });
     Ok(axum_app)
 }
