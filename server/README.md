@@ -113,3 +113,20 @@ See [Workspace access implementation](docs/workspace-access.md) for the new Type
 ## Deployment validation
 
 See [current deployment validation evidence](docs/production-validation-progress.md) for recovery, restore, policy-query measurements and the remaining deployment/load gates. The Render blueprint uses only the free plan. Do not infer full production validation from the correctness tests alone.
+
+The ignored hosted HTTP suites can target the validation deployment by setting
+`BUSINESS_TEST_BASE_URL=https://jitpomi-business-validation.onrender.com` alongside
+an explicitly selected `BUSINESS_ENV_FILE` for `business_dev`. Their synthetic
+fixtures are still provisioned directly in that development database; HTTP calls
+then use the public endpoint. The local JWT configuration must match the tested
+service for the suites that also check internal-service authentication. Never
+point this harness at a production database. Secrets are not command arguments.
+
+`public_restart_prepare` saves a synthetic record/session fixture at a new path
+specified by `BUSINESS_RESTART_FIXTURE` with mode 0600. Request exactly one Render
+restart, wait for a new process start in provider logs and healthy HTTPS, then run
+`public_restart_verify` with the same private fixture. It verifies persisted data
+and logout, then removes its record and logs out the remaining token. A failed
+mutation response can mean the write committed: inspect the saved resource before
+retrying; this harness does not automatically retry writes. Do not commit fixture
+files or place them in the public repository.

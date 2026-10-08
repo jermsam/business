@@ -67,7 +67,7 @@ async fn hosted_business_soak() {
     let cycles:usize=results.iter().map(|r|r.0).sum();
     let mut latencies:Vec<u64>=results.into_iter().flat_map(|r|r.1).collect(); latencies.sort_unstable();
     let p95=latencies[(latencies.len()-1)*95/100]; let p99=latencies[(latencies.len()-1)*99/100];
-    let report=json!({"tenants":10,"concurrent_users":10,"duration_seconds":start.elapsed().as_secs_f64(),"cycles":cycles,"requests":latencies.len(),"unexpected_statuses":0,"p95_ms":p95,"p99_ms":p99,"max_ms":latencies.last(),"database":"business_dev","transport":"in-process Axum router; real TypeDB Cloud","model":"closed-loop, one user per tenant, 100 ms pause per cycle"});
+    let report=json!({"tenants":10,"concurrent_users":10,"duration_seconds":start.elapsed().as_secs_f64(),"cycles":cycles,"requests":latencies.len(),"unexpected_statuses":0,"p95_ms":p95,"p99_ms":p99,"max_ms":latencies.last(),"database":"business_dev","transport":std::env::var("BUSINESS_TEST_BASE_URL").map(|base|format!("public HTTPS {base}; real TypeDB Cloud")).unwrap_or_else(|_|"in-process Axum router; real TypeDB Cloud".into()),"model":"closed-loop, one user per tenant, 100 ms pause per cycle"});
     println!("BUSINESS_SOAK {report}");
     // Provisional bounded launch gate, not the unrelated DogRS queue benchmark.
     assert!(latencies.len()>=1000,"Insufficient throughput for provisional baseline");

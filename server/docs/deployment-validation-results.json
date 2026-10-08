@@ -12,7 +12,16 @@
   ],
   "clippy": "passed --locked --all-targets -- -D warnings",
   "format": "passed",
-  "deployment": "not yet deployed",
+  "deployment": {
+    "provider": "Render",
+    "plan": "Free",
+    "monthly_service_price_usd": 0,
+    "service_id": "srv-db3tstrbc2fs73buj2dg",
+    "commit": "9b1e16974e1b7db7f13692d002ccc70ae8243fb5",
+    "url": "https://jitpomi-business-validation.onrender.com",
+    "auto_deploy": "off",
+    "status": "live"
+  },
   "production_certification": false,
   "policy_diagnostic_ms": {
     "identity": 78,
@@ -36,5 +45,53 @@
     "max_ms": 2271,
     "transport": "in-process Axum router; real TypeDB Cloud",
     "model": "closed-loop, one user per tenant, 100 ms pause per cycle"
+  },
+  "public_correctness": {
+    "passed": 3,
+    "failed": 0,
+    "seconds": 97.66,
+    "suites": [
+      "hosted_auth_and_revocation",
+      "hosted_business_data_isolation",
+      "hosted_workspace_policy"
+    ]
+  },
+  "edge_checks": {
+    "https_health": 200,
+    "protected_without_token": 401,
+    "raw_query_route": 404,
+    "oversized_body": {
+      "status": 400,
+      "message": "Could not read request body within its size limit"
+    },
+    "plain_http_redirect": {
+      "status": 301,
+      "destination": "https://jitpomi-business-validation.onrender.com/health"
+    }
+  },
+  "restart": {
+    "passed_after_confirmed_process_start": true,
+    "verification_seconds": 4.03,
+    "record_persisted": true,
+    "valid_session_persisted": true,
+    "revocation_persisted": true,
+    "initial_attempt": "Two overlapping restarts caused a 502 during cleanup DELETE; subsequent GET returned 404, showing the delete committed despite the failed response. Old session revoked. Fresh fixture and one confirmed restart passed."
+  },
+  "public_soak": {
+    "passed": false,
+    "tenants": 10,
+    "concurrent_users": 10,
+    "duration_seconds": 303.052741542,
+    "cycles": 140,
+    "requests": 980,
+    "required_requests": 1000,
+    "unexpected_statuses": 0,
+    "p95_ms": 3493,
+    "p99_ms": 3798,
+    "max_ms": 5343,
+    "latency_gate_passed": true,
+    "throughput_gate_passed": false,
+    "transport": "public HTTPS via a separate curl process per request; real TypeDB Cloud",
+    "caveat": "Includes network, connection setup and test-client process overhead. Does not isolate application versus infrastructure capacity."
   }
 }

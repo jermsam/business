@@ -71,6 +71,9 @@ mod live_tests {
         data: Value,
         token: Option<&str>,
     ) -> (u16, Value) {
+        if let Ok(base) = std::env::var("BUSINESS_TEST_BASE_URL") {
+            return remote_call(&base, tenant, method, path, data, token).await;
+        }
         let mut req = http::Request::builder()
             .method(method)
             .uri(path)
@@ -93,6 +96,9 @@ mod live_tests {
         let body = result.into_body().collect().await.unwrap().to_bytes();
         (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
     }
+    include!("remote_test_client.rs");
+    #[cfg(unix)]
+    include!("public_restart_tests.rs");
     #[tokio::test]
     #[ignore = "Requires explicitly configured business_dev on real TypeDB Cloud"]
     async fn hosted_auth_and_revocation() {
