@@ -54,7 +54,7 @@ fn lookup_identity(identity: &str, tenant: &str) -> Result<String> {
       select $u, $t, $id, $tenant_id, $password;
       match let $active = biz_account_active($u, $t); $active == true;
       let $member = biz_member($u, $t, {}); $member == true;
-      fetch {{ "id": $id, "tenant_id": $tenant_id, "email": $u.email, "password": $password }};"#,
+      fetch {{ "id": $id, "tenant_id": $tenant_id, "email": $u.email, "password": $password, "versions": [$u.auth_version] }};"#,
         tenant_match(tenant)?,
         now()
     ))
@@ -85,7 +85,7 @@ fn entity_from_response(response: &Value) -> Result<Option<Value>> {
     let id = canonical_identity(user, "id")?;
     let tenant_id = canonical_identity(user, "tenant_id")?;
     Ok(Some(
-        json!({"id":id,"tenant_id":tenant_id,"email":email,"password":password}),
+        json!({"id":id,"tenant_id":tenant_id,"email":email,"password":password,"credential_version":user.pointer("/versions/0").and_then(Value::as_str).unwrap_or("initial")}),
     ))
 }
 fn canonical_identity(user: &Value, field: &str) -> Result<String> {
@@ -120,9 +120,28 @@ pub fn register_local(
     }));
     auth.register(
         "local",
-        Arc::new(strategy) as Arc<dyn AuthenticationStrategy<BusinessParams>>,
+        Arc::new(VersionedLocal(strategy)) as Arc<dyn AuthenticationStrategy<BusinessParams>>,
     );
 }
+// Stamp the version observed by the password verifier, never a second lookup that
+// could race a reset and bless an old password with a newer credential version.
+struct VersionedLocal(LocalStrategy<BusinessParams>);
+#[async_trait::async_trait]
+impl AuthenticationStrategy<BusinessParams> for VersionedLocal {
+    async fn authenticate(
+        &self,
+        request: &dog_auth::core::AuthenticationRequest,
+        params: &dog_auth::core::AuthenticationParams,
+        ctx: &mut HookContext<Value, BusinessParams>,
+        auth: &dog_auth::core::AuthenticationBase<BusinessParams>,
+    ) -> Result<dog_auth::core::AuthenticationResult> {
+        let mut result = self.0.authenticate(request, params, ctx, auth).await?;
+        let payload = json!({"sub":result["user"]["id"],"credential_version":result["user"]["credential_version"]});
+        result["accessToken"] = json!(auth.create_access_token(payload, None).await?);
+        Ok(result)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

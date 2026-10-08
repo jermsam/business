@@ -214,6 +214,24 @@ impl Engine {
         let status = providers::status(provider, value)?;
         let url = providers::pay_url(provider, value, self.providers.live)?;
         let now = chrono::Utc::now().timestamp();
+        let record = self.validate_observation(id, provider, value).await?;
+        let row = &record;
+        // Older deliveries may never undo a paid/void observation. Refunds and disputes
+        // are distinct events, not a transition back to unpaid.
+        if matches!(string(row, "status")?, "paid" | "void") && row["status"] != status {
+            return Ok(());
+        }
+        self.write(format!(r#"{permission} {} $i has bill_status {};select $t,$i;distinct;update $i has bill_status "{status}",has bill_external_id {},has bill_url {},has bill_updated {now};fetch {{"id":$i.bill_key}};"#,self.invoice_match(id)?,schema::quoted(string(row,"status")?),schema::quoted(external),schema::quoted(&url))).await?;
+        Ok(())
+    }
+    pub async fn validate_observation(
+        &self,
+        id: &str,
+        provider: Provider,
+        value: &Value,
+    ) -> Result<Value> {
+        let external = providers::field(value, "id")?;
+        providers::safe_id(external)?;
         let rows=self.read(format!(r#"{} fetch {{"provider":$i.bill_provider,"external":$i.bill_external_id,"amount":$i.bill_amount,"mercury_id":$c.bill_mercury_id,"stripe_id":$c.bill_stripe_id,"status":$i.bill_status}};"#,self.invoice_match(id)?)).await?;
         ensure!(rows.len() == 1, "Invoice missing");
         let row = &rows[0];
@@ -249,13 +267,7 @@ impl Engine {
                 );
             }
         }
-        // Older deliveries may never undo a paid/void observation. Refunds and disputes
-        // are distinct events, not a transition back to unpaid.
-        if matches!(string(row, "status")?, "paid" | "void") && row["status"] != status {
-            return Ok(());
-        }
-        self.write(format!(r#"{permission} {} $i has bill_status {};select $t,$i;distinct;update $i has bill_status "{status}",has bill_external_id {},has bill_url {},has bill_updated {now};fetch {{"id":$i.bill_key}};"#,self.invoice_match(id)?,schema::quoted(string(row,"status")?),schema::quoted(external),schema::quoted(&url))).await?;
-        Ok(())
+        Ok(row.clone())
     }
     pub async fn reconcile(&self, id: &str) -> Result<()> {
         let rows = self
@@ -306,10 +318,14 @@ impl Engine {
         Ok(())
     }
     pub async fn tick(&self) -> Result<Value> {
+        let (recovery_notices, recovery_errors) =
+            crate::services::recovery::RecoveryService::new(self.state.clone())
+                .process_pending()
+                .await?;
         let scheduled = self.enqueue_due(chrono::Utc::now().timestamp()).await?;
         let rows=self.read(format!(r#"{} (merchant:$t,customer:$c) isa bill_account;(customer:$c,plan:$p) isa bill_plan_owner;(plan:$p,invoice:$i) isa bill_invoice_owner;$i has bill_status "queued",has bill_updated $updated,has bill_key $id;select $i,$updated,$id;distinct;sort $updated,$id;limit 10;fetch {{"id":$i.bill_key}};"#,self.prefix())).await?;
         let mut issued = 0;
-        let mut errors = 0;
+        let mut errors = recovery_errors;
         for row in rows {
             let id = string(&row, "id")?;
             self.mark_attempt(id).await?;
@@ -340,7 +356,7 @@ impl Engine {
         let (notices, notification_errors) = self.send_notices().await?;
         errors += notification_errors;
         Ok(
-            json!({"scheduled":scheduled,"issued":issued,"reconciled":reconciled,"notices":notices,"errors":errors}),
+            json!({"scheduled":scheduled,"issued":issued,"reconciled":reconciled,"notices":notices,"recovery_notices":recovery_notices,"errors":errors}),
         )
     }
 }

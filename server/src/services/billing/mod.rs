@@ -11,3 +11,5 @@ pub mod actions;
 pub mod http;
 
 mod notifications;
+
+mod history;

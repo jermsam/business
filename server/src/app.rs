@@ -42,6 +42,7 @@ pub fn router(http: DogHttpService<Value, BusinessParams>) -> axum::Router {
     axum::Router::new()
         .route_service("/authentication", endpoint(http.clone()))
         .route_service("/onboarding", endpoint(http.clone()))
+        .route_service("/recovery", endpoint(http.clone()))
         .route_service("/billing-actions", endpoint(http.clone()))
         .route_service("/billing-customers", endpoint(http.clone()))
         .route_service("/billing-customers/{id}", endpoint(http.clone()))
@@ -143,6 +144,7 @@ mod live_tests {
     }
     include!("remote_test_client.rs");
     include!("billing_tests.rs");
+    include!("password_recovery_tests.rs");
     #[cfg(unix)]
     include!("public_restart_tests.rs");
     #[tokio::test]

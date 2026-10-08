@@ -37,6 +37,15 @@ pub(crate) async fn write_one(
     state: &crate::typedb::TypeDBState,
     query: &str,
 ) -> Result<Vec<Value>> {
+    let query = guard_write(query)?;
+    write_atomic_one(state, &query).await
+}
+
+/// Server-owned identity/recovery templates which coordinate on a user instead of a tenant.
+pub(crate) async fn write_atomic_one(
+    state: &crate::typedb::TypeDBState,
+    query: &str,
+) -> Result<Vec<Value>> {
     use dog_core::DogError;
     use std::time::Duration;
     use tokio::time::timeout;
@@ -44,7 +53,6 @@ pub(crate) async fn write_one(
     const DEADLINE: Duration = Duration::from_secs(30);
     #[cfg(test)]
     let stage = std::time::Instant::now();
-    let query = guard_write(query)?;
     let tx = timeout(
         DEADLINE,
         state.driver.transaction_with_options(
@@ -61,7 +69,7 @@ pub(crate) async fn write_one(
     #[cfg(test)]
     let stage = std::time::Instant::now();
     let result = timeout(DEADLINE, async {
-        let mut stream = tx.query(&query).await?.into_documents();
+        let mut stream = tx.query(query).await?.into_documents();
         let mut rows = Vec::new();
         while let Some(doc) = stream.try_next().await? {
             if !rows.is_empty() {

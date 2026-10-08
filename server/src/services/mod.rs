@@ -1,7 +1,8 @@
 use dog_core::DogAppBuilder;
 use serde_json::Value;
 use std::sync::Arc;
-mod onboarding;
+pub(crate) mod onboarding;
+pub mod recovery;
 mod types;
 pub use types::*;
 mod apps;
@@ -18,6 +19,10 @@ pub fn configure(
     state: Arc<crate::typedb::TypeDBState>,
 ) -> anyhow::Result<()> {
     builder.register_service("authentication", auth.clone());
+    builder.register_service(
+        "recovery",
+        Arc::new(recovery::RecoveryService::new(state.clone())),
+    );
     builder.register_service(
         "onboarding",
         Arc::new(onboarding::OnboardingService::new(

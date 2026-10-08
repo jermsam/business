@@ -637,6 +637,16 @@ async fn hosted_invoice_recovery_checks_binding_and_owner() {
     forged = observation.clone();forged["total"] = json!(101);
     assert!(engine.apply_observation(invoice,provider,&forged).await.is_err());
     assert!(engine.apply_observation_guarded(invoice,provider,&observation,"match $denied isa user,has email \"nonexistent-recovery-actor@example.invalid\";").await.is_err(),"Failed permission match cannot report success");
-    let (s, v) = call(http,&identities[0].0,"POST","/billing-actions",action,Some(&identities[0].1)).await;
+    let (s, v) = call(http.clone(),&identities[0].0,"POST","/billing-actions",action,Some(&identities[0].1)).await;
     assert_eq!(s,200,"Owner recovery: {v}");assert_eq!(v["reconciled"],true);
+    let tag=uuid::Uuid::new_v4().simple().to_string();let domain=format!("history-stranger-{tag}.example.com");let email=format!("history-stranger-{tag}@example.com");let hash=bcrypt::hash("billing-test-only",4).unwrap();
+    dog_typedb::TypeDBAdapter::new(state.clone()).write(json!({"query":format!(r#"insert $u isa user,has email "{email}",has password "{hash}";$t isa company,has company_domain "{domain}";(tenant:$t,member:$u) isa tenant_membership;"#)})).await.unwrap();prepare_fixture(&state).await;
+    let(s,stranger)=call(http.clone(),&domain,"POST","/authentication",json!({"strategy":"local","email":email,"password":"billing-test-only"}),None).await;assert_eq!(s,200);
+    let(s,_)=call(http.clone(),&domain,"POST","/billing-actions",json!({"action":"history","invoice_id":invoice}),stranger["accessToken"].as_str()).await;assert_eq!(s,404,"Another tenant cannot inspect a real invoice history");
+    for actor in &identities {
+      let (s, history)=call(http.clone(),&actor.0,"POST","/billing-actions",json!({"action":"history","invoice_id":invoice}),Some(&actor.1)).await;
+      assert_eq!(s,200,"Authorized payment history: {history}");assert_eq!(history["supported"],true);assert_eq!(history["amount_paid_cents"],100);
+      let (s,_)=call(http.clone(),&actor.0,"POST","/billing-actions",json!({"action":"history","invoice_id":uuid::Uuid::new_v4().to_string()}),Some(&actor.1)).await;assert_eq!(s,404);
+    }
+
 }

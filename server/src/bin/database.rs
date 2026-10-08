@@ -48,16 +48,13 @@ async fn main() -> Result<()> {
         "Only dedicated Business databases may be provisioned"
     );
     if std::env::args().nth(1).as_deref() == Some("migrate-billing") {
-        anyhow::ensure!(
-            db == "business_dev",
-            "Validate billing migration in business_dev first"
-        );
         apply_schema_sources(
             &driver,
             &db,
             &[
                 include_str!("../../migrations/005-billing.tql"),
                 include_str!("../../migrations/006-customer-onboarding.tql"),
+                include_str!("../../migrations/007-recovery-and-history.tql"),
             ],
             false,
         )
@@ -66,10 +63,6 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if std::env::args().nth(1).as_deref() == Some("migrate-access") {
-        anyhow::ensure!(
-            db == "business_dev",
-            "Validate access migration in business_dev first"
-        );
         apply_access_migration(&driver, &db).await?;
         println!("Applied workspace access schema/functions to {db}");
         return Ok(());
@@ -103,7 +96,25 @@ async fn main() -> Result<()> {
         ],
     )
     .await?;
+    apply_schema_sources(
+        &driver,
+        &db,
+        &[include_str!("../../migrations/001-private-records.tql")],
+        false,
+    )
+    .await?;
     apply_access_migration(&driver, &db).await?;
+    apply_schema_sources(
+        &driver,
+        &db,
+        &[
+            include_str!("../../migrations/005-billing.tql"),
+            include_str!("../../migrations/006-customer-onboarding.tql"),
+            include_str!("../../migrations/007-recovery-and-history.tql"),
+        ],
+        false,
+    )
+    .await?;
     println!("Provisioned {db}");
     Ok(())
 }

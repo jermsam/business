@@ -47,6 +47,15 @@ impl AuthenticationStrategy<BusinessParams> for TenantJwt {
             })?;
         #[cfg(test)]
         crate::access::trace_enter("jwt-resolver-done");
+        if result
+            .pointer("/payload/credential_version")
+            .and_then(Value::as_str)
+            != user.get("credential_version").and_then(Value::as_str)
+        {
+            return Err(
+                DogError::not_authenticated("Credentials changed; sign in again").into_anyhow(),
+            );
+        }
         if let Some(map) = user.as_object_mut() {
             map.remove("password");
         }

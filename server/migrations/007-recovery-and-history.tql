@@ -1,0 +1,16 @@
+define
+attribute auth_version, value string;
+attribute auth_request_key, value string;
+attribute auth_status, value string;
+user owns auth_version @card(0..1);
+entity portal_recovery,
+ owns biz_id @key, owns auth_request_key @key, owns email @card(1),
+ owns portal_expires @card(1), owns portal_used @card(1), owns auth_status @card(1),
+ owns portal_token_hash @unique, owns auth_version @card(0..1);
+relation portal_recovery_owner, relates recovery @card(1), relates person @card(1);
+portal_recovery plays portal_recovery_owner:recovery @card(0..1);
+user plays portal_recovery_owner:person;
+attribute bill_history, value string;
+bill_invoice owns bill_history @card(0..1);
+# A fixed key serializes concurrent first-owner provisioning attempts.
+entity portal_bootstrap, owns auth_request_key @key;

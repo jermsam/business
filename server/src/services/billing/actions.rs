@@ -33,6 +33,9 @@ impl Actions {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Action {
+    History {
+        invoice_id: String,
+    },
     ReconcileInvoice {
         invoice_id: String,
         provider_invoice_id: String,
@@ -59,6 +62,30 @@ impl DogService<Value, BusinessParams> for Actions {
     ) -> Result<Value> {
         let scope = self.access.scope(ctx, params).await?;
         let action: Action = schema::parse(data)?;
+        if let Action::History { invoice_id } = &action {
+            let invoice_id = schema::id(invoice_id)?;
+            let engine = Engine::configured(self.state.clone())?;
+            let permitted = format!(
+                r#"{scope} $i isa bill_invoice,has bill_key "{invoice_id}";(invoice:$i,plan:$p) isa bill_invoice_owner;(plan:$p,customer:$c) isa bill_plan_owner;let $allowed=bill_reader($u,$t,$c,$now);$allowed==true;"#
+            );
+            let rows=self.access.query(format!(r#"{permitted} fetch {{"provider":$i.bill_provider,"external":$i.bill_external_id}};"#),false).await?;
+            if rows.len() != 1 {
+                return Err(DogError::not_found("Invoice unavailable").into_anyhow());
+            }
+            let provider: schema::Provider = serde_json::from_value(rows[0]["provider"].clone())?;
+            let external = providers::field(&rows[0], "external")?;
+            ensure!(!external.is_empty(), "Invoice is not yet issued");
+            let observation = engine.providers.observe(provider, external).await?;
+            engine
+                .validate_observation(&invoice_id, provider, &observation)
+                .await?;
+            let history = engine
+                .providers
+                .payment_history(provider, &observation)
+                .await?;
+            self.access.query(format!(r#"{permitted} select $t,$i;distinct;update $i has bill_history {};fetch {{"id":$i.bill_key}};"#,schema::quoted(&history.to_string())),true).await?;
+            return Ok(history);
+        }
         if let Action::ReconcileInvoice {
             invoice_id,
             provider_invoice_id,
@@ -98,7 +125,7 @@ impl DogService<Value, BusinessParams> for Actions {
             Action::SetupCard { customer_id, .. } | Action::ConfirmCard { customer_id, .. } => {
                 schema::id(customer_id)?
             }
-            Action::ReconcileInvoice { .. } => unreachable!(),
+            Action::ReconcileInvoice { .. } | Action::History { .. } => unreachable!(),
         };
         let permitted = format!(
             r#"{scope} $c isa bill_customer,has bill_key "{customer_id}";let $allowed=bill_buyer($u,$t,$c,$now);$allowed==true;"#
@@ -120,7 +147,7 @@ impl DogService<Value, BusinessParams> for Actions {
         let actor = string(row, "actor")?;
         let revision = string(row, "revision")?;
         match action {
-            Action::ReconcileInvoice { .. } => unreachable!(),
+            Action::ReconcileInvoice { .. } | Action::History { .. } => unreachable!(),
             Action::SetupCard {
                 expected_revision, ..
             } => {

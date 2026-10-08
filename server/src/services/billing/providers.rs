@@ -41,9 +41,14 @@ impl Providers {
             },
             "Stripe key does not match billing mode"
         );
+        let mut url = reqwest::Url::parse(&format!("https://api.stripe.com/v1{path}"))?;
+        if method == Method::GET && !form.is_empty() {
+            url.query_pairs_mut()
+                .extend_pairs(form.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        }
         let mut request = self
             .http
-            .request(method.clone(), format!("https://api.stripe.com/v1{path}"))
+            .request(method.clone(), url)
             .bearer_auth(token)
             .header("Stripe-Version", "2026-03-25.dahlia");
         if method != Method::GET {

@@ -48,10 +48,17 @@ impl WorkspaceService {
             .pointer("/user/tenant_id")
             .and_then(Value::as_str)
             .ok_or_else(|| DogError::not_authenticated("Missing tenant").into_anyhow())?;
+        let credential = verified
+            .pointer("/user/credential_version")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                DogError::not_authenticated("Credential version required").into_anyhow()
+            })?;
+        let credential = crate::services::billing::billing_schema::quoted(credential);
         let id = uuid::Uuid::parse_str(id)?;
         let tenant = uuid::Uuid::parse_str(tenant)?;
         Ok(format!(
-            r#"match $u isa user, has biz_id "{id}";
+            r#"match $u isa user, has biz_id "{id}"; not {{$u has auth_version $changed; $changed != {credential};}};
             $t isa company, has biz_id "{tenant}", has biz_revision $revision;
             let $now = {};
             select $u, $t, $now;
