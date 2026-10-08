@@ -24,6 +24,21 @@ static ACTIVE: LazyLock<Semaphore> =
 static WAITING: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(32));
 
 pub(crate) async fn guard(request: Request, next: Next) -> Response {
+    if let Ok(secret) = std::env::var("PORTAL_ORIGIN_SECRET") {
+        use subtle::ConstantTimeEq;
+        let supplied = request
+            .headers()
+            .get("x-portal-secret")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if secret.len() < 32 || !bool::from(secret.as_bytes().ct_eq(supplied.as_bytes())) {
+            return (
+                StatusCode::UNAUTHORIZED,
+                axum::Json(serde_json::json!({"message":"Portal access required"})),
+            )
+                .into_response();
+        }
+    }
     let started = std::time::Instant::now();
     let Ok(waiting) = WAITING.try_acquire() else {
         return overloaded();

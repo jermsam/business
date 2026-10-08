@@ -41,6 +41,14 @@ dog_transport::declare_adapter!(axum, endpoint, crate::BusinessParams);
 pub fn router(http: DogHttpService<Value, BusinessParams>) -> axum::Router {
     axum::Router::new()
         .route_service("/authentication", endpoint(http.clone()))
+        .route_service("/onboarding", endpoint(http.clone()))
+        .route_service("/billing-actions", endpoint(http.clone()))
+        .route_service("/billing-customers", endpoint(http.clone()))
+        .route_service("/billing-customers/{id}", endpoint(http.clone()))
+        .route_service("/billing-plans", endpoint(http.clone()))
+        .route_service("/billing-plans/{id}", endpoint(http.clone()))
+        .route_service("/billing-invoices", endpoint(http.clone()))
+        .route_service("/billing-invoices/{id}", endpoint(http.clone()))
         .route_service("/records", endpoint(http.clone()))
         .route_service("/records/{id}", endpoint(http.clone()))
         .route_service("/workspace-records", endpoint(http.clone()))
@@ -54,6 +62,43 @@ pub fn router(http: DogHttpService<Value, BusinessParams>) -> axum::Router {
         .route_service("/team-memberships/{id}", endpoint(http))
         .route_layer(axum::middleware::from_fn(crate::admission::guard))
         .route("/health", axum::routing::get(|| async { "ok" }))
+        .route(
+            "/billing",
+            axum::routing::get(|| async {
+                axum::response::Html(include_str!("../public/billing.html"))
+            }),
+        )
+        .route(
+            "/billing.js",
+            axum::routing::get(|| async {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/javascript")],
+                    include_str!("../public/billing.js"),
+                )
+            }),
+        )
+        .route(
+            "/billing.css",
+            axum::routing::get(|| async {
+                (
+                    [(axum::http::header::CONTENT_TYPE, "text/css")],
+                    include_str!("../public/billing.css"),
+                )
+            }),
+        )
+}
+
+/// Billing ingress is opt-in so existing deployments remain unchanged until configured.
+pub fn billing_router(app: &DogApp<Value, BusinessParams>) -> Result<axum::Router> {
+    if std::env::var("BILLING_ENABLED").as_deref() != Ok("true") {
+        return Ok(axum::Router::new());
+    }
+    let state = app
+        .get::<std::sync::Arc<crate::typedb::TypeDBState>>("typedb")
+        .ok_or_else(|| anyhow::anyhow!("Missing database"))?;
+    crate::services::billing::http::router(crate::services::billing::engine::Engine::configured(
+        state,
+    )?)
 }
 
 #[cfg(test)]
@@ -97,6 +142,7 @@ mod live_tests {
         (status, serde_json::from_slice(&body).unwrap_or(Value::Null))
     }
     include!("remote_test_client.rs");
+    include!("billing_tests.rs");
     #[cfg(unix)]
     include!("public_restart_tests.rs");
     #[tokio::test]

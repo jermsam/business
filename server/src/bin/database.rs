@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     anyhow::ensure!(
         matches!(
             std::env::args().nth(1).as_deref(),
-            Some("create" | "schema" | "migrate-records" | "migrate-access")
+            Some("create" | "schema" | "migrate-records" | "migrate-access" | "migrate-billing")
         ),
         "Use list, create, schema, migrate-records, migrate-access, or create-user"
     );
@@ -47,6 +47,24 @@ async fn main() -> Result<()> {
         matches!(db.as_str(), "business_dev" | "business_prod"),
         "Only dedicated Business databases may be provisioned"
     );
+    if std::env::args().nth(1).as_deref() == Some("migrate-billing") {
+        anyhow::ensure!(
+            db == "business_dev",
+            "Validate billing migration in business_dev first"
+        );
+        apply_schema_sources(
+            &driver,
+            &db,
+            &[
+                include_str!("../../migrations/005-billing.tql"),
+                include_str!("../../migrations/006-customer-onboarding.tql"),
+            ],
+            false,
+        )
+        .await?;
+        println!("Applied billing schema to {db}");
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("migrate-access") {
         anyhow::ensure!(
             db == "business_dev",
@@ -92,6 +110,20 @@ async fn main() -> Result<()> {
 
 /// All access types and function updates commit together; failures close the transaction.
 async fn apply_access_migration(driver: &typedb_driver::TypeDBDriver, db: &str) -> Result<()> {
+    let sources = [
+        include_str!("../../migrations/002-workspace-access.tql"),
+        include_str!("../../workspace-functions.tql"),
+        include_str!("../../migrations/003-account-lifecycle.tql"),
+        include_str!("../../migrations/004-identity-concurrency.tql"),
+    ];
+    apply_schema_sources(driver, db, &sources, true).await
+}
+async fn apply_schema_sources(
+    driver: &typedb_driver::TypeDBDriver,
+    db: &str,
+    sources: &[&str],
+    backfill: bool,
+) -> Result<()> {
     let existing = driver.databases().get(db).await?.schema().await?;
     let names = regex::Regex::new(r"(?m)\bfun\s+([A-Za-z_][A-Za-z_0-9]*)\s*\(")?;
     let known: std::collections::HashSet<_> = names
@@ -106,12 +138,6 @@ async fn apply_access_migration(driver: &typedb_driver::TypeDBDriver, db: &str) 
                 .transaction_timeout(std::time::Duration::from_secs(120)),
         )
         .await?;
-    let sources = [
-        include_str!("../../migrations/002-workspace-access.tql"),
-        include_str!("../../workspace-functions.tql"),
-        include_str!("../../migrations/003-account-lifecycle.tql"),
-        include_str!("../../migrations/004-identity-concurrency.tql"),
-    ];
     for source in sources {
         let positions: Vec<_> = names
             .captures_iter(source)
@@ -135,7 +161,9 @@ async fn apply_access_migration(driver: &typedb_driver::TypeDBDriver, db: &str) 
                 .await?;
         }
     }
-    server::access::backfill(&tx).await?;
+    if backfill {
+        server::access::backfill(&tx).await?;
+    }
     tx.commit().await.map_err(|e| {
         anyhow::anyhow!("Access migration commit failed; inspect schema before retrying: {e}")
     })?;
