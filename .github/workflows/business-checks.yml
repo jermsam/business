@@ -1,0 +1,32 @@
+name: Business checks
+on:
+  pull_request:
+    paths: ['server/**', '.github/workflows/business-checks.yml']
+  push:
+    paths: ['server/**', '.github/workflows/business-checks.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: business-checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  correctness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: server
+    env:
+      CARGO_INCREMENTAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build prerequisites
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler pkg-config libssl-dev
+      - name: Rust toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt && rustup default stable
+      - run: cargo fmt --check
+      - run: cargo test --locked --lib
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      # Hosted tests are explicit operator runs against synthetic data. CI never
+      # receives payment/database credentials or creates provider resources.
