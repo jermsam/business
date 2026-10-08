@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-08",
+  "database": "business_dev",
+  "type": "correctness and recovery after split grant policy",
+  "tests_passed": 13,
+  "tests_failed": 0,
+  "elapsed_seconds": 101.6,
+  "excluded": [
+    "hosted_business_soak",
+    "hosted_backup_restore_drill",
+    "hosted_policy_query_diagnostics"
+  ],
+  "clippy": "passed --locked --all-targets -- -D warnings",
+  "format": "passed",
+  "deployment": "not yet deployed",
+  "production_certification": false,
+  "policy_diagnostic_ms": {
+    "identity": 78,
+    "member": 85,
+    "entitlement": 73,
+    "allow": 272,
+    "deny": 64,
+    "authorized": 302
+  },
+  "diagnostic_caveat": "Single samples; not a capacity certification",
+  "soak": {
+    "passed": true,
+    "tenants": 10,
+    "concurrent_users": 10,
+    "duration_seconds": 307.600378875,
+    "requests": 1610,
+    "cycles": 230,
+    "unexpected_statuses": 0,
+    "p95_ms": 2181,
+    "p99_ms": 2218,
+    "max_ms": 2271,
+    "transport": "in-process Axum router; real TypeDB Cloud",
+    "model": "closed-loop, one user per tenant, 100 ms pause per cycle"
+  }
+}
