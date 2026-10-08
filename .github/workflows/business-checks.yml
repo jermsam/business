@@ -3,6 +3,7 @@ on:
   pull_request:
     paths: ['server/**', '.github/workflows/business-checks.yml']
   push:
+    branches: [main]
     paths: ['server/**', '.github/workflows/business-checks.yml']
   workflow_dispatch:
 permissions:

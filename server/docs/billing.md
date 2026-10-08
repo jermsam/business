@@ -218,3 +218,18 @@ secure customer password recovery, explicit refunds/disputes/partial-payment his
 operator handling of uncertain mail delivery, and an exercised production restore
 and support procedure. Free-host cold starts also affect availability. Keep
 `BILLING_LIVE=false`; these audit fixes do not constitute live-launch approval.
+
+
+The audited backend was deployed to the free Render validation service and portal
+Worker version `d3d732ba-c666-4ef3-8ef9-4e0a8f2ec853`. HTTPS canary checks passed
+buyer login, customer-only scope, consent revision projection, paid history,
+missing-consent rejection and logout. Live TypeDB token revocation also passed.
+The new GitHub correctness workflow installs lint components for the repository's
+pinned Rust toolchain; hosted tests remain explicit runs without CI-held secrets.
+
+Reference checks: [Stripe webhook behavior](https://docs.stripe.com/webhooks),
+[Stripe idempotency](https://docs.stripe.com/api/idempotent_requests), and
+[OWASP password recovery requirements](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html).
+Password recovery must include expiring single-use tokens, non-enumerating responses,
+abuse controls and session invalidation; a replacement onboarding invitation is not
+a password reset mechanism.

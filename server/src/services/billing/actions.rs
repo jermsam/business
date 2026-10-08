@@ -76,7 +76,9 @@ impl DogService<Value, BusinessParams> for Actions {
                 engine.merchant
             );
             let rows = self.access.query(permitted, false).await?;
-            ensure!(rows.len() == 1, "Invoice unavailable");
+            if rows.len() != 1 {
+                return Err(DogError::not_found("Invoice unavailable").into_anyhow());
+            }
             let provider: schema::Provider = serde_json::from_value(rows[0]["provider"].clone())?;
             let observation = engine
                 .providers

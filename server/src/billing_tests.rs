@@ -627,7 +627,7 @@ async fn hosted_invoice_recovery_checks_binding_and_owner() {
     }
     let action = json!({"action":"reconcile_invoice","invoice_id":invoice,"provider_invoice_id":external});
     let (s, _) = call(http.clone(),&identities[1].0,"POST","/billing-actions",action.clone(),Some(&identities[1].1)).await;
-    assert!(s >= 400, "Buyer cannot perform operator recovery");
+    assert_eq!(s, 404, "Buyer cannot perform operator recovery");
     let engine = crate::services::billing::engine::Engine::configured(state.clone()).unwrap();
     let provider = crate::services::billing::billing_schema::Provider::Stripe;
     let observation = engine.providers.observe(provider,external).await.unwrap();
