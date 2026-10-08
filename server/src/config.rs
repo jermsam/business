@@ -11,6 +11,7 @@ pub fn config(app: &mut DogAppBuilder<Value, BusinessParams>) -> Result<()> {
         &env::var("TYPEDB_FORCE_RECREATE").unwrap_or_else(|_| "false".into()),
         &env::var("TYPEDB_USERNAME").unwrap_or_default(),
     )?;
+    crate::admission::configured_limit()?;
     config_http(app)?;
     config_typedb(app)?;
     configure_auth(app)

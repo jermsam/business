@@ -1,6 +1,33 @@
+static REMOTE_TIMINGS: std::sync::Mutex<Vec<(f64,f64)>> = std::sync::Mutex::new(Vec::new());
+// Reuse an HTTPS connection pool as recommended by reqwest. Keep the original
+// curl mode available for comparisons; neither mode retries failed mutations.
+async fn remote_call(base: &str, tenant: &str, method: &str, path: &str, data: Value, token: Option<&str>) -> (u16, Value) {
+    if std::env::var("BUSINESS_TEST_HTTP_CLIENT").as_deref()==Ok("curl") {
+        return remote_call_curl(base,tenant,method,path,data,token).await;
+    }
+    static CLIENT:std::sync::LazyLock<reqwest::Client>=std::sync::LazyLock::new(||reqwest::Client::builder()
+        .https_only(true).redirect(reqwest::redirect::Policy::none())
+        .retry(reqwest::retry::never()).timeout(std::time::Duration::from_secs(90))
+        .connect_timeout(std::time::Duration::from_secs(15)).pool_max_idle_per_host(10)
+        .build().expect("HTTPS test client"));
+    assert!(base.starts_with("https://") && !base.contains(['\n','\r','?','#','@']));
+    assert!(path.starts_with('/') && !path.contains(['\n','\r']));
+    let mut request=CLIENT.request(reqwest::Method::from_bytes(method.as_bytes()).unwrap(),format!("{}{path}",base.trim_end_matches('/')))
+        .header("x-tenant-id",tenant).json(&data);
+    if let Some(token)=token {request=request.bearer_auth(token);}
+    if path=="/subjects" {request=request.header("x-service-method","read");}
+    let response=request.send().await.expect("Public HTTPS request failed");
+    let status=response.status().as_u16();
+    if let Some(timing)=response.headers().get("server-timing").and_then(|v|v.to_str().ok()) {
+        let mut parts=timing.split(", ").filter_map(|p|p.split_once(";dur=").and_then(|(_,v)|v.parse::<f64>().ok()));
+        if let (Some(queue),Some(service))=(parts.next(),parts.next()) {REMOTE_TIMINGS.lock().unwrap().push((queue,service));}
+    }
+    let bytes=response.bytes().await.expect("Public HTTPS response body failed");
+    (status,serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+}
 // Optional public HTTPS transport for the existing hosted acceptance suites.
 // Request bodies and bearer tokens travel through stdin, never process arguments.
-async fn remote_call(base: &str, tenant: &str, method: &str, path: &str, data: Value, token: Option<&str>) -> (u16, Value) {
+async fn remote_call_curl(base: &str, tenant: &str, method: &str, path: &str, data: Value, token: Option<&str>) -> (u16, Value) {
     use std::io::Write;
     use std::process::{Command, Stdio};
     assert!(base.starts_with("https://") && !base.contains(['\n','\r','?','#','@']));

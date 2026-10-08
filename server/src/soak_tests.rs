@@ -1,6 +1,10 @@
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "Five-minute business_dev acceptance run; ten concurrent tenants"]
-async fn hosted_business_soak() {
+async fn hosted_business_soak() { run_business_soak(300,1000).await; }
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "Thirty-second admission diagnostic, not an acceptance gate"]
+async fn hosted_admission_diagnostics() { run_business_soak(30,0).await; }
+async fn run_business_soak(seconds:u64, minimum_requests:usize) {
     use std::time::{Duration, Instant};
     let (app, http) = build().await.unwrap();
     let state = app.get::<std::sync::Arc<crate::typedb::TypeDBState>>("typedb").unwrap();
@@ -30,6 +34,7 @@ async fn hosted_business_soak() {
         assert_eq!(status,200);
         clients.push((tid.to_string(),pid.to_string(),login["accessToken"].as_str().unwrap().to_owned()));
     }
+    REMOTE_TIMINGS.lock().unwrap().clear();
     let start=Instant::now();
     let mut workers=Vec::new();
     for (i,(tenant,project,token)) in clients.iter().cloned().enumerate() {
@@ -37,7 +42,7 @@ async fn hosted_business_soak() {
         let foreign=clients[(i+1)%clients.len()].0.clone();
         workers.push(tokio::spawn(async move {
             let mut times=Vec::new(); let mut cycles=0;
-            while start.elapsed()<Duration::from_secs(300) {
+            while start.elapsed()<Duration::from_secs(seconds) {
                 let at=Instant::now();
                 let (status,data)=call(http.clone(),&tenant,"POST","/workspace-records",json!({"name":"Soak record","project_id":project}),Some(&token)).await;
                 times.push(at.elapsed().as_millis() as u64); assert_eq!(status,200,"create tenant {i}");
@@ -67,9 +72,15 @@ async fn hosted_business_soak() {
     let cycles:usize=results.iter().map(|r|r.0).sum();
     let mut latencies:Vec<u64>=results.into_iter().flat_map(|r|r.1).collect(); latencies.sort_unstable();
     let p95=latencies[(latencies.len()-1)*95/100]; let p99=latencies[(latencies.len()-1)*99/100];
-    let report=json!({"tenants":10,"concurrent_users":10,"duration_seconds":start.elapsed().as_secs_f64(),"cycles":cycles,"requests":latencies.len(),"unexpected_statuses":0,"p95_ms":p95,"p99_ms":p99,"max_ms":latencies.last(),"database":"business_dev","transport":std::env::var("BUSINESS_TEST_BASE_URL").map(|base|format!("public HTTPS {base}; real TypeDB Cloud")).unwrap_or_else(|_|"in-process Axum router; real TypeDB Cloud".into()),"model":"closed-loop, one user per tenant, 100 ms pause per cycle"});
+    let report=json!({"tenants":10,"concurrent_users":10,"http_client":std::env::var("BUSINESS_TEST_HTTP_CLIENT").unwrap_or_else(|_|"reqwest-pooled".into()),"duration_seconds":start.elapsed().as_secs_f64(),"cycles":cycles,"requests":latencies.len(),"unexpected_statuses":0,"p95_ms":p95,"p99_ms":p99,"max_ms":latencies.last(),"database":"business_dev","transport":std::env::var("BUSINESS_TEST_BASE_URL").map(|base|format!("public HTTPS {base}; real TypeDB Cloud")).unwrap_or_else(|_|"in-process Axum router; real TypeDB Cloud".into()),"model":"closed-loop, one user per tenant, 100 ms pause per cycle"});
     println!("BUSINESS_SOAK {report}");
+    let timing=REMOTE_TIMINGS.lock().unwrap();
+    if !timing.is_empty() {
+        let mut queue:Vec<f64>=timing.iter().map(|t|t.0).collect();let mut service:Vec<f64>=timing.iter().map(|t|t.1).collect();
+        queue.sort_by(f64::total_cmp);service.sort_by(f64::total_cmp);
+        println!("ADMISSION_TIMING count={} queue_p95_ms={:.1} service_p95_ms={:.1}",timing.len(),queue[(queue.len()-1)*95/100],service[(service.len()-1)*95/100]);
+    }
     // Provisional bounded launch gate, not the unrelated DogRS queue benchmark.
-    assert!(latencies.len()>=1000,"Insufficient throughput for provisional baseline");
+    assert!(latencies.len()>=minimum_requests,"Insufficient throughput for provisional baseline");
     assert!(p95<=5000 && p99<=10000,"Latency gate failed");
 }
