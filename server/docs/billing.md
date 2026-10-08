@@ -163,7 +163,19 @@ this probe is not proof of Stripe delivery. A hosted scheduler invocation return
 HTTP 200 with zero errors and one receipt notification after correcting the
 synthetic customer billing email to the approved dev@jitpomi.com recipient.
 
-Browser-driven card setup/return and Stripe delivery verification remain unfinished.
+Browser-driven card setup/return also passed: the customer reviewed the schedule,
+saved Stripe test card 4242 in hosted Checkout, returned to jitpomi.com, and received
+the verified-authorization confirmation. The future test schedule was paused afterward.
+
+The scheduled USD 1.00 sandbox invoice `in_1UOOOZCs4HOI1uJlwxWR9Fc2` was issued
+through the hosted tick and paid with an attached sandbox card via Stripe test API.
+Before another explicit reconciliation, the protected customer API showed paid.
+Stripe event `evt_1UOOOzCs4HOI1uJlt6lHWalo` reported zero pending webhooks.
+A receipt tick sent one notice with zero errors; the replay sent zero notices.
+The older fixture first blocked mail to example.com and then queued a Mercury invoice
+because no hosted Mercury credential exists. Correcting its billing recipient to
+dev@jitpomi.com and its manual provider to Stripe resolved both, without weakening
+the test-email restriction or copying the IP-restricted Mercury token.
 This is a sandbox deployment, not live customer billing. The website portal README
 tracks remaining launch requirements. Do not import real customers or activate live
 collection until those requirements are satisfied.
