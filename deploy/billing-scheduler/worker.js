@@ -9,7 +9,7 @@ export async function run(env) {
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash) throw new Error('BUSINESS_URL must be a trusted HTTPS origin');
   if (!env.BILLING_TICK_SECRET || env.BILLING_TICK_SECRET.length < 32) throw new Error('Missing billing scheduler secret');
   const response = await fetch(new URL('/internal/billing/tick', base), {
-    method: 'POST', redirect: 'error',
+    method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(110000),
     headers: { Authorization: `Bearer ${env.BILLING_TICK_SECRET}` },
   });
   if (!response.ok) throw new Error(`Billing scheduler returned HTTP ${response.status}`);
