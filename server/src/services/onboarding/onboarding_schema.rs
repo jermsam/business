@@ -3,6 +3,8 @@ use serde::Deserialize;
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Input {
     Invite { name: String, email: String },
+    RevokeInvite { customer_id: String },
+    RenewInvite { customer_id: String },
     Accept { token: String, password: String },
 }
 pub fn email(raw: &str) -> anyhow::Result<String> {

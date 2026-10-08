@@ -199,6 +199,16 @@ impl Engine {
         provider: Provider,
         value: &Value,
     ) -> Result<()> {
+        self.apply_observation_guarded(id, provider, value, "")
+            .await
+    }
+    pub async fn apply_observation_guarded(
+        &self,
+        id: &str,
+        provider: Provider,
+        value: &Value,
+        permission: &str,
+    ) -> Result<()> {
         let external = providers::field(value, "id")?;
         providers::safe_id(external)?;
         let status = providers::status(provider, value)?;
@@ -244,7 +254,7 @@ impl Engine {
         if matches!(string(row, "status")?, "paid" | "void") && row["status"] != status {
             return Ok(());
         }
-        self.write(format!(r#"{} $i has bill_status {};select $t,$i;distinct;update $i has bill_status "{status}",has bill_external_id {},has bill_url {},has bill_updated {now};fetch {{"id":$i.bill_key}};"#,self.invoice_match(id)?,schema::quoted(string(row,"status")?),schema::quoted(external),schema::quoted(&url))).await?;
+        self.write(format!(r#"{permission} {} $i has bill_status {};select $t,$i;distinct;update $i has bill_status "{status}",has bill_external_id {},has bill_url {},has bill_updated {now};fetch {{"id":$i.bill_key}};"#,self.invoice_match(id)?,schema::quoted(string(row,"status")?),schema::quoted(external),schema::quoted(&url))).await?;
         Ok(())
     }
     pub async fn reconcile(&self, id: &str) -> Result<()> {
@@ -288,13 +298,22 @@ impl Engine {
             Err(_) => self.reconcile(id).await,
         }
     }
+    // Rotate attempted work even when a provider errors or the tick is cancelled.
+    // Otherwise a permanently failing first batch can starve every later invoice.
+    pub async fn mark_attempt(&self, id: &str) -> Result<()> {
+        let now = chrono::Utc::now().timestamp();
+        self.write(format!(r#"{} select $t,$i;distinct;update $i has bill_updated {now};fetch {{"id":$i.bill_key}};"#,self.invoice_match(id)?)).await?;
+        Ok(())
+    }
     pub async fn tick(&self) -> Result<Value> {
         let scheduled = self.enqueue_due(chrono::Utc::now().timestamp()).await?;
-        let rows=self.read(format!(r#"{} (merchant:$t,customer:$c) isa bill_account;(customer:$c,plan:$p) isa bill_plan_owner;(plan:$p,invoice:$i) isa bill_invoice_owner;$i has bill_status "queued";select $i;distinct;limit 10;fetch {{"id":$i.bill_key}};"#,self.prefix())).await?;
+        let rows=self.read(format!(r#"{} (merchant:$t,customer:$c) isa bill_account;(customer:$c,plan:$p) isa bill_plan_owner;(plan:$p,invoice:$i) isa bill_invoice_owner;$i has bill_status "queued",has bill_updated $updated,has bill_key $id;select $i,$updated,$id;distinct;sort $updated,$id;limit 10;fetch {{"id":$i.bill_key}};"#,self.prefix())).await?;
         let mut issued = 0;
         let mut errors = 0;
         for row in rows {
-            if self.issue(string(&row, "id")?).await.is_ok() {
+            let id = string(&row, "id")?;
+            self.mark_attempt(id).await?;
+            if self.issue(id).await.is_ok() {
                 issued += 1
             } else {
                 errors += 1
@@ -304,6 +323,7 @@ impl Engine {
         let mut reconciled = 0;
         for row in rows {
             let id = string(&row, "id")?;
+            self.mark_attempt(id).await?;
             if self.reconcile(id).await.is_ok() {
                 reconciled += 1;
                 if self
@@ -317,7 +337,8 @@ impl Engine {
                 errors += 1
             }
         }
-        let notices = self.send_notices().await?;
+        let (notices, notification_errors) = self.send_notices().await?;
+        errors += notification_errors;
         Ok(
             json!({"scheduled":scheduled,"issued":issued,"reconciled":reconciled,"notices":notices,"errors":errors}),
         )

@@ -80,6 +80,48 @@ impl DogService<Value, BusinessParams> for OnboardingService {
                     json!({"customer_id":customer,"tenant_id":buyer,"token":token,"expires_at":expires}),
                 )
             }
+            action @ (Input::RevokeInvite { .. } | Input::RenewInvite { .. }) => {
+                let (customer_id, renew) = match action {
+                    Input::RevokeInvite { customer_id } => (customer_id, false),
+                    Input::RenewInvite { customer_id } => (customer_id, true),
+                    _ => unreachable!(),
+                };
+                let customer = crate::services::billing::billing_schema::id(&customer_id)?;
+                let scope = self.access.scope(ctx, params).await?;
+                let merchant = Engine::configured(self.state.clone())?.merchant;
+                let token = format!(
+                    "{}{}",
+                    uuid::Uuid::new_v4().simple(),
+                    uuid::Uuid::new_v4().simple()
+                );
+                let hash = digest(&token);
+                let expires = if renew {
+                    chrono::Utc::now().timestamp() + 48 * 3600
+                } else {
+                    0
+                };
+                let query = format!(
+                    r#"{scope} $t has biz_id "{merchant}";
+                    $c isa bill_customer,has bill_key "{customer}";
+                    let $allowed=bill_seller($u,$t,$c,$now);$allowed==true;
+                    (merchant:$t,buyer:$buyer,customer:$c) isa bill_account;
+                    (tenant:$buyer,invitation:$invite) isa portal_invitation_owner;
+                    $invite has portal_used false;
+                    select $t,$invite,$buyer;distinct;
+                    update $invite has portal_token_hash "{hash}",has portal_expires {expires};
+                    fetch {{"tenant_id":$buyer.biz_id}};"#
+                );
+                let rows = self.access.query(query, true).await?;
+                ensure!(
+                    rows.len() == 1,
+                    "Invitation unavailable or already accepted"
+                );
+                if renew {
+                    Ok(json!({"token":token,"expires_at":expires,"tenant_id":rows[0]["tenant_id"]}))
+                } else {
+                    Ok(json!({"revoked":true}))
+                }
+            }
             Input::Accept { token, password } => {
                 ensure!(
                     token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit()),

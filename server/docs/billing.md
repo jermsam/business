@@ -179,3 +179,42 @@ the test-email restriction or copying the IP-restricted Mercury token.
 This is a sandbox deployment, not live customer billing. The website portal README
 tracks remaining launch requirements. Do not import real customers or activate live
 collection until those requirements are satisfied.
+
+
+### Customer-launch audit, 2026-10-08
+
+Implemented and tested against Cloud business_dev:
+
+- Card setup requires the revision of the schedules actually reviewed. The portal
+  loads every customer and schedule page, reads customer revisions before plans,
+  and freezes the reviewed revision before opening its consent dialog. A concurrent
+  change rejects Checkout authorization; a redirect alone still cannot grant consent.
+- Plan creation requires a caller-generated UUID `request_id`. A retry with the same
+  ID and immutable terms returns the original plan; different terms are rejected.
+  The UI retains the request ID for failed attempts within the current page session.
+- Merchant owners can revoke or replace an unused invitation. Rotation immediately
+  invalidates the old token. Accepted invitations cannot create another membership.
+- Merchant-only `reconcile_invoice` takes a local invoice ID and provider invoice ID.
+  It observes an existing provider invoice and verifies customer, amount, currency,
+  provider and local metadata binding; it neither creates invoices nor charges cards.
+  Authorization is rechecked in the write transaction. Drafts with incomplete amounts
+  must be investigated in the provider dashboard; do not recreate uncertain invoices.
+- Notification failures are counted individually. Invoice attempts rotate through
+  oldest work even on provider error/cancellation, reducing batch starvation.
+- Live startup requires separate `business_prod`, distinct origin/scheduler secrets,
+  a live Stripe key and webhook configuration. This is configuration validation,
+  not evidence that production provisioning or live activation has happened.
+
+Evidence from this audit: stale-consent, invitation rotation/revocation, schedule
+retry/isolation and operator reconciliation regressions passed on real TypeDB Cloud.
+Stripe sandbox payment/email flow passed in 30.98 seconds: invoice
+`in_1UOOdbCs4HOI1uJlMP8vWeLo` paid and receipt accepted; invoice
+`in_1UOOdoCs4HOI1uJlkUq7sPmj` declined and reminder accepted. Replays created no
+new notices or payment attempts. Email acceptance is not inbox-delivery certification.
+These tests used current local code, sandbox payments, and only dev@jitpomi.com.
+
+Remaining launch blockers: production database/merchant bootstrap and migration,
+secure customer password recovery, explicit refunds/disputes/partial-payment history,
+operator handling of uncertain mail delivery, and an exercised production restore
+and support procedure. Free-host cold starts also affect availability. Keep
+`BILLING_LIVE=false`; these audit fixes do not constitute live-launch approval.

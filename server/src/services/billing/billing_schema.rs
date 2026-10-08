@@ -82,6 +82,7 @@ impl CustomerInput {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PlanInput {
+    pub request_id: String,
     pub customer_id: String,
     pub description: String,
     pub amount_cents: i64,

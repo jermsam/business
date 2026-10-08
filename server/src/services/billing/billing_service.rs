@@ -59,7 +59,7 @@ impl BillingService {
         Ok(rows.remove(0))
     }
 }
-pub const CUSTOMER: &str = r#"fetch {"id":$c.bill_key,"name":$c.name,"email":$c.bill_email,"policy":$c.bill_policy,"choice":$c.bill_choice,"manual_provider":$c.bill_provider};"#;
+pub const CUSTOMER: &str = r#"fetch {"id":$c.bill_key,"name":$c.name,"email":$c.bill_email,"policy":$c.bill_policy,"choice":$c.bill_choice,"manual_provider":$c.bill_provider,"revision":$c.bill_revision};"#;
 pub const PLAN: &str = r#"fetch {"id":$p.bill_key,"customer_id":$c.bill_key,"description":$p.name,"amount_cents":$p.bill_amount,"currency":"USD","start_at":$p.bill_anchor,"next_at":$p.bill_next,"interval":$p.bill_interval,"due_days":$p.bill_due_days,"status":$p.bill_status};"#;
 pub const INVOICE: &str = r#"fetch {"id":$i.bill_key,"customer_id":$c.bill_key,"description":$i.name,"amount_cents":$i.bill_amount,"currency":"USD","issued_at":$i.bill_anchor,"due_at":$i.bill_next,"status":$i.bill_status,"mode":$i.bill_choice,"provider":$i.bill_provider,"payment_url":$i.bill_url};"#;
 #[async_trait]
@@ -140,6 +140,32 @@ impl DogService<Value, BusinessParams> for BillingService {
             }
             Kind::Plans => {
                 let input: schema::PlanInput = schema::parse(data)?;
+                let key = schema::id(&input.request_id)?;
+                // A client retry must identify the original schedule, never create another.
+                let existing = self
+                    .access
+                    .query(
+                        format!(r#"{scope} $p isa bill_plan,has bill_key "{key}";(customer:$c,plan:$p) isa bill_plan_owner;let $owner=bill_seller($u,$t,$c,$now);$owner==true;{PLAN}"#),
+                        false,
+                    )
+                    .await?;
+                if let Some(plan) = existing.first() {
+                    let requested =
+                        chrono::DateTime::parse_from_rfc3339(&input.start_at)?.timestamp();
+                    if plan["customer_id"] == input.customer_id
+                        && plan["description"] == input.description
+                        && plan["amount_cents"].as_f64() == Some(input.amount_cents as f64)
+                        && plan["due_days"].as_f64() == Some(input.due_days as f64)
+                        && plan["start_at"].as_f64() == Some(requested as f64)
+                        && plan["interval"] == schema::word(input.interval)
+                    {
+                        return Ok(plan.clone());
+                    }
+                    return Err(DogError::bad_request(
+                        "Request ID already belongs to different schedule terms",
+                    )
+                    .into_anyhow());
+                }
                 let start = input.validate(chrono::Utc::now()).map_err(|_| {
                     DogError::bad_request("Invalid USD amount, date, interval or due days")
                         .into_anyhow()

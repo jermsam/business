@@ -33,8 +33,13 @@ impl Actions {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Action {
+    ReconcileInvoice {
+        invoice_id: String,
+        provider_invoice_id: String,
+    },
     SetupCard {
         customer_id: String,
+        expected_revision: String,
     },
     ConfirmCard {
         customer_id: String,
@@ -54,10 +59,44 @@ impl DogService<Value, BusinessParams> for Actions {
     ) -> Result<Value> {
         let scope = self.access.scope(ctx, params).await?;
         let action: Action = schema::parse(data)?;
+        if let Action::ReconcileInvoice {
+            invoice_id,
+            provider_invoice_id,
+        } = &action
+        {
+            let invoice_id = schema::id(invoice_id)?;
+            providers::safe_id(provider_invoice_id)?;
+            let engine = Engine::configured(self.state.clone())?;
+            let permitted = format!(
+                r#"{scope} $t has biz_id "{}";
+                $i isa bill_invoice,has bill_key "{invoice_id}";
+                (invoice:$i,plan:$p) isa bill_invoice_owner;(plan:$p,customer:$c) isa bill_plan_owner;
+                let $allowed=bill_seller($u,$t,$c,$now);$allowed==true;
+                fetch {{"provider":$i.bill_provider}};"#,
+                engine.merchant
+            );
+            let rows = self.access.query(permitted, false).await?;
+            ensure!(rows.len() == 1, "Invoice unavailable");
+            let provider: schema::Provider = serde_json::from_value(rows[0]["provider"].clone())?;
+            let observation = engine
+                .providers
+                .observe(provider, provider_invoice_id)
+                .await?;
+            // Binds customer, provider, exact amount and local invoice metadata before writing.
+            // This action never creates an invoice or attempts a payment.
+            let permission = format!(
+                r#"{scope} $i isa bill_invoice,has bill_key "{invoice_id}";(invoice:$i,plan:$p) isa bill_invoice_owner;(plan:$p,customer:$c) isa bill_plan_owner;let $allowed=bill_seller($u,$t,$c,$now);$allowed==true;"#
+            );
+            engine
+                .apply_observation_guarded(&invoice_id, provider, &observation, &permission)
+                .await?;
+            return Ok(json!({"reconciled":true}));
+        }
         let customer_id = match &action {
-            Action::SetupCard { customer_id } | Action::ConfirmCard { customer_id, .. } => {
+            Action::SetupCard { customer_id, .. } | Action::ConfirmCard { customer_id, .. } => {
                 schema::id(customer_id)?
             }
+            Action::ReconcileInvoice { .. } => unreachable!(),
         };
         let permitted = format!(
             r#"{scope} $c isa bill_customer,has bill_key "{customer_id}";let $allowed=bill_buyer($u,$t,$c,$now);$allowed==true;"#
@@ -79,7 +118,14 @@ impl DogService<Value, BusinessParams> for Actions {
         let actor = string(row, "actor")?;
         let revision = string(row, "revision")?;
         match action {
-            Action::SetupCard { .. } => {
+            Action::ReconcileInvoice { .. } => unreachable!(),
+            Action::SetupCard {
+                expected_revision, ..
+            } => {
+                ensure!(
+                    expected_revision == revision,
+                    "Billing changed; reload and review the schedules before authorizing"
+                );
                 ensure!(
                     row["policy"] != "manual",
                     "Seller has disabled automatic payments"

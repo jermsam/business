@@ -101,7 +101,7 @@ async fn hosted_billing_isolation_and_schedule() {
     .await;
     assert_eq!(s, 400);
     let start = chrono::Utc::now() - chrono::Duration::seconds(1);
-    let plan = json!({"customer_id":id,"description":"One-off test","amount_cents":1250,"start_at":start.to_rfc3339(),"interval":"once","due_days":7});
+    let plan = json!({"request_id":uuid::Uuid::new_v4().to_string(),"customer_id":id,"description":"One-off test","amount_cents":1250,"start_at":start.to_rfc3339(),"interval":"once","due_days":7});
     let (s, _) = call(
         http.clone(),
         &buyer.0,
@@ -117,11 +117,16 @@ async fn hosted_billing_isolation_and_schedule() {
         &seller.0,
         "POST",
         "/billing-plans",
-        plan,
+        plan.clone(),
         Some(&seller.2),
     )
     .await;
     assert_eq!(s, 200, "Create plan: {p}");
+    let (s,replay)=call(http.clone(),&seller.0,"POST","/billing-plans",plan.clone(),Some(&seller.2)).await;
+    assert_eq!(s,200);assert_eq!(replay["id"],p["id"],"Retry must not duplicate schedule");
+    let mut changed=plan.clone();changed["amount_cents"]=json!(2500);
+    let (s,_)=call(http.clone(),&seller.0,"POST","/billing-plans",changed,Some(&seller.2)).await;assert_eq!(s,400);
+
     let engine = Engine {
         state: state.clone(),
         merchant: seller.1.clone(),
@@ -350,7 +355,7 @@ async fn hosted_billing_payment_and_mail_flows() {
         .await;
         assert_eq!(s, 200, "{v}");
         let start = chrono::Utc::now();
-        let (s,p)=call(http.clone(),&seller.0,"POST","/billing-plans",json!({"customer_id":id,"description":format!("TEST {scenario} scheduled payment — no real funds"),"amount_cents":1250,"start_at":start.to_rfc3339(),"interval":"once","due_days":0}),Some(&seller.2)).await;
+        let (s,p)=call(http.clone(),&seller.0,"POST","/billing-plans",json!({"request_id":uuid::Uuid::new_v4().to_string(),"customer_id":id,"description":format!("TEST {scenario} scheduled payment — no real funds"),"amount_cents":1250,"start_at":start.to_rfc3339(),"interval":"once","due_days":0}),Some(&seller.2)).await;
         assert_eq!(s, 200, "{p}");
         assert_eq!(
             engine.enqueue_due(start.timestamp() - 1).await.unwrap(),
@@ -484,8 +489,15 @@ async fn hosted_customer_onboarding() {
     )
     .await;
     assert_eq!(s, 200, "{invite}");
-    let token = invite["token"].as_str().unwrap();
+    let old_token = invite["token"].as_str().unwrap();
     let tenant = invite["tenant_id"].as_str().unwrap();
+    let (s, _) = call(http.clone(), domain, "POST", "/onboarding", json!({"action":"revoke_invite","customer_id":invite["customer_id"]}), Some(auth)).await;
+    assert_eq!(s,200);
+    let (s, _) = call(http.clone(), tenant, "POST", "/onboarding", json!({"action":"accept","token":old_token,"password":"test-only-password-123"}), None).await;
+    assert_eq!(s,401,"Revoked invitation must fail");
+    let (s, renewed) = call(http.clone(), domain, "POST", "/onboarding", json!({"action":"renew_invite","customer_id":invite["customer_id"]}), Some(auth)).await;
+    assert_eq!(s,200); assert_ne!(renewed["token"],invite["token"]);
+    let token = renewed["token"].as_str().unwrap();
     let accept = json!({"action":"accept","token":token,"password":"test-only-password-123"});
     let (s, result) = call(
         http.clone(),
@@ -574,4 +586,57 @@ async fn hosted_customer_onboarding() {
     .await;
     assert_eq!(s, 200, "Existing account invitation: {result}");
     println!("Onboarding passed: new account, existing identity, single-use invitation, merchant-only invitation and cross-tenant rejection");
+}
+
+#[tokio::test]
+#[ignore = "Requires the synthetic Cloud business_dev billing fixture"]
+async fn hosted_stale_consent_is_rejected_before_checkout() {
+    let (app, http) = build().await.unwrap();
+    let state = app.get::<std::sync::Arc<crate::typedb::TypeDBState>>("typedb").unwrap();
+    assert_eq!(state.database, "business_dev");
+    let fixture: Value = serde_json::from_slice(&std::fs::read(std::env::var("BILLING_UI_FIXTURE_FILE").unwrap()).unwrap()).unwrap();
+    let customer=fixture["customer_id"].as_str().unwrap();
+    let buyer=fixture["buyer_domain"].as_str().unwrap();
+    let seller=fixture["seller_domain"].as_str().unwrap();
+    let (s, b)=call(http.clone(),buyer,"POST","/authentication",json!({"strategy":"local","email":fixture["buyer_email"],"password":"billing-test-only"}),None).await;assert_eq!(s,200);
+    let (s, a)=call(http.clone(),seller,"POST","/authentication",json!({"strategy":"local","email":fixture["seller_email"],"password":"billing-test-only"}),None).await;assert_eq!(s,200);
+    let buyer_token=b["accessToken"].as_str().unwrap();let seller_token=a["accessToken"].as_str().unwrap();
+    let (s, before)=call(http.clone(),buyer,"GET",&format!("/billing-customers/{customer}"),Value::Null,Some(buyer_token)).await;assert_eq!(s,200);assert!(before["revision"].is_string());
+    let (s, after)=call(http.clone(),seller,"PATCH",&format!("/billing-customers/{customer}"),json!({"policy":"customer"}),Some(seller_token)).await;assert_eq!(s,200);assert_ne!(before["revision"],after["revision"]);
+    let (s, _)=call(http.clone(),buyer,"POST","/billing-actions",json!({"action":"setup_card","customer_id":customer,"expected_revision":before["revision"]}),Some(buyer_token)).await;assert!(s>=400,"Stale terms must never create Checkout");
+    let (s, _)=call(http,buyer,"POST","/billing-actions",json!({"action":"setup_card","customer_id":customer}),Some(buyer_token)).await;assert_eq!(s,400,"Missing reviewed revision rejected");
+}
+
+
+#[tokio::test]
+#[ignore = "Requires synthetic Cloud billing fixture and sandbox Stripe read access"]
+async fn hosted_invoice_recovery_checks_binding_and_owner() {
+    dotenvy::from_path(std::env::var("BILLING_TEST_ENV").unwrap()).unwrap();
+    let (app, http) = build().await.unwrap();
+    let state = app.get::<std::sync::Arc<crate::typedb::TypeDBState>>("typedb").unwrap();
+    assert_eq!(state.database, "business_dev");
+    let fixture: Value = serde_json::from_slice(&std::fs::read(std::env::var("BILLING_UI_FIXTURE_FILE").unwrap()).unwrap()).unwrap();
+    let invoice = "3eed7da5-96b7-425b-b8d6-a2844f35d4cc";
+    let external = "in_1UOOOZCs4HOI1uJlwxWR9Fc2";
+    let mut identities = Vec::new();
+    for role in ["seller", "buyer"] {
+        let domain = fixture[format!("{role}_domain")].as_str().unwrap();
+        let (s, v) = call(http.clone(),domain,"POST","/authentication",json!({"strategy":"local","email":fixture[format!("{role}_email")],"password":"billing-test-only"}),None).await;
+        assert_eq!(s,200);
+        identities.push((domain.to_owned(),v["accessToken"].as_str().unwrap().to_owned()));
+    }
+    let action = json!({"action":"reconcile_invoice","invoice_id":invoice,"provider_invoice_id":external});
+    let (s, _) = call(http.clone(),&identities[1].0,"POST","/billing-actions",action.clone(),Some(&identities[1].1)).await;
+    assert!(s >= 400, "Buyer cannot perform operator recovery");
+    let engine = crate::services::billing::engine::Engine::configured(state.clone()).unwrap();
+    let provider = crate::services::billing::billing_schema::Provider::Stripe;
+    let observation = engine.providers.observe(provider,external).await.unwrap();
+    let mut forged = observation.clone();
+    forged["metadata"]["business_invoice"] = json!(uuid::Uuid::new_v4().to_string());
+    assert!(engine.apply_observation(invoice,provider,&forged).await.is_err());
+    forged = observation.clone();forged["total"] = json!(101);
+    assert!(engine.apply_observation(invoice,provider,&forged).await.is_err());
+    assert!(engine.apply_observation_guarded(invoice,provider,&observation,"match $denied isa user,has email \"nonexistent-recovery-actor@example.invalid\";").await.is_err(),"Failed permission match cannot report success");
+    let (s, v) = call(http,&identities[0].0,"POST","/billing-actions",action,Some(&identities[0].1)).await;
+    assert_eq!(s,200,"Owner recovery: {v}");assert_eq!(v["reconciled"],true);
 }

@@ -73,16 +73,22 @@ impl Engine {
         result?;
         Ok(1)
     }
-    pub async fn send_notices(&self) -> Result<usize> {
+    pub async fn send_notices(&self) -> Result<(usize, usize)> {
         if std::env::var("BILLING_MAIL_ENABLED").as_deref() != Ok("true") {
-            return Ok(0);
+            return Ok((0, 0));
         }
         let rows = self.notification_candidates().await?;
         let mut sent = 0;
+        let mut errors = 0;
         for row in rows {
-            sent += self.notify_invoice(string(&row, "id")?).await?;
+            let id = string(&row, "id")?;
+            self.mark_attempt(id).await?;
+            match self.notify_invoice(id).await {
+                Ok(count) => sent += count,
+                Err(_) => errors += 1,
+            }
         }
-        Ok(sent)
+        Ok((sent, errors))
     }
     pub async fn notification_candidates(&self) -> Result<Vec<serde_json::Value>> {
         let rows=self.read(format!(r#"{} (merchant:$t,customer:$c) isa bill_account;(customer:$c,plan:$p) isa bill_plan_owner;(plan:$p,invoice:$i) isa bill_invoice_owner;

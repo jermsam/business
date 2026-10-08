@@ -11,6 +11,19 @@ pub fn config(app: &mut DogAppBuilder<Value, BusinessParams>) -> Result<()> {
         &env::var("TYPEDB_FORCE_RECREATE").unwrap_or_else(|_| "false".into()),
         &env::var("TYPEDB_USERNAME").unwrap_or_default(),
     )?;
+    if env::var("BILLING_LIVE").as_deref() == Ok("true") {
+        validate_live_billing(
+            &env::var("TYPEDB_DB").unwrap_or_default(),
+            &env::var("PORTAL_ORIGIN_SECRET").unwrap_or_default(),
+            &env::var("BILLING_TICK_SECRET").unwrap_or_default(),
+            &env::var("STRIPE_WEBHOOK_SECRET").unwrap_or_default(),
+            &env::var("STRIPE_SECRET_KEY").unwrap_or_default(),
+        )?;
+        anyhow::ensure!(
+            env::var("BILLING_ENABLED").as_deref() == Ok("true"),
+            "Live billing requires its scheduler and webhook ingress"
+        );
+    }
     crate::admission::configured_limit()?;
     config_http(app)?;
     config_typedb(app)?;
@@ -95,5 +108,77 @@ mod tests {
         assert!(validate_security(secret, "false", "false", "business_dev_app").is_err());
         assert!(validate_security(secret, "true", "true", "business_dev_app").is_err());
         assert!(validate_security(secret, "true", "false", "admin").is_err());
+    }
+}
+
+// Live mode is a deliberate deployment step; validation data and unprotected
+// origins must never become a live billing system by toggling one flag.
+fn validate_live_billing(
+    database: &str,
+    origin: &str,
+    tick: &str,
+    webhook: &str,
+    stripe: &str,
+) -> Result<()> {
+    anyhow::ensure!(
+        database == "business_prod",
+        "Live billing requires the separately provisioned business_prod database"
+    );
+    anyhow::ensure!(
+        origin.len() >= 32 && tick.len() >= 32 && origin != tick,
+        "Live billing requires distinct origin and scheduler secrets"
+    );
+    anyhow::ensure!(
+        webhook.starts_with("whsec_") && webhook.len() >= 32,
+        "Live billing requires a configured Stripe webhook secret"
+    );
+    anyhow::ensure!(
+        stripe.starts_with("sk_live_") || stripe.starts_with("rk_live_"),
+        "Live billing requires a live Stripe key"
+    );
+    Ok(())
+}
+#[cfg(test)]
+mod billing_config_tests {
+    use super::validate_live_billing;
+    #[test]
+    fn live_billing_rejects_validation_database_and_missing_protections() {
+        let origin = "a".repeat(64);
+        let tick = "b".repeat(64);
+        let webhook = format!("whsec_{}", "c".repeat(32));
+        assert!(validate_live_billing(
+            "business_prod",
+            &origin,
+            &tick,
+            &webhook,
+            "sk_live_fixture"
+        )
+        .is_ok());
+        assert!(
+            validate_live_billing("business_dev", &origin, &tick, &webhook, "sk_live_fixture")
+                .is_err()
+        );
+        assert!(
+            validate_live_billing("business_prod", "", &tick, &webhook, "sk_live_fixture").is_err()
+        );
+        assert!(validate_live_billing(
+            "business_prod",
+            &origin,
+            &origin,
+            &webhook,
+            "sk_live_fixture"
+        )
+        .is_err());
+        assert!(
+            validate_live_billing("business_prod", &origin, &tick, "", "sk_live_fixture").is_err()
+        );
+        assert!(validate_live_billing(
+            "business_prod",
+            &origin,
+            &tick,
+            &webhook,
+            "sk_test_fixture"
+        )
+        .is_err());
     }
 }
