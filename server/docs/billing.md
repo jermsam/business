@@ -233,3 +233,12 @@ Reference checks: [Stripe webhook behavior](https://docs.stripe.com/webhooks),
 Password recovery must include expiring single-use tokens, non-enumerating responses,
 abuse controls and session invalidation; a replacement onboarding invitation is not
 a password reset mechanism.
+
+
+The expanded Cloud backup/restore drill passed in 9.28 seconds, comparing 4,148
+identity, policy, billing, invitation and ownership records. It checks amounts,
+provider references, consent revisions, charge/notification claims, and relationship
+bindings after importing an encrypted-in-transit export into a temporary database on
+the same cluster. The temporary database and private local export were removed by
+the drill. This certifies the exercised business_dev export/import path, not a
+provider-region outage, production backup schedule, or production recovery time.

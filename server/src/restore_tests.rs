@@ -31,6 +31,15 @@ async fn hosted_backup_restore_drill() {
             a.sort(); b.sort(); anyhow::ensure!(a==b,"Restored identity set differs for {kind}"); checked+=a.len();
         }
         for query in [
+            r#"match $c isa bill_customer; fetch {"id":$c.bill_key,"name":$c.name,"email":$c.bill_email,"policy":$c.bill_policy,"choice":$c.bill_choice,"provider":$c.bill_provider,"stripe":$c.bill_stripe_id,"mercury":$c.bill_mercury_id,"card":$c.bill_payment_method,"revision":$c.bill_revision,"consent":$c.bill_consent};"#,
+            r#"match $p isa bill_plan; fetch {"id":$p.bill_key,"amount":$p.bill_amount,"anchor":$p.bill_anchor,"next":$p.bill_next,"sequence":$p.bill_sequence,"interval":$p.bill_interval,"days":$p.bill_due_days,"status":$p.bill_status};"#,
+            r#"match $i isa bill_invoice; fetch {"id":$i.bill_key,"amount":$i.bill_amount,"provider":$i.bill_provider,"external":$i.bill_external_id,"revision":$i.bill_revision,"choice":$i.bill_choice,"status":$i.bill_status,"url":$i.bill_url,"due":$i.bill_next};"#,
+            r#"match $n isa bill_notice; fetch {"id":$n.bill_key,"status":$n.bill_status};"#,
+            r#"match (merchant:$m,buyer:$b,customer:$c) isa bill_account; fetch {"merchant":$m.biz_id,"buyer":$b.biz_id,"customer":$c.bill_key};"#,
+            r#"match (customer:$c,plan:$p) isa bill_plan_owner; fetch {"customer":$c.bill_key,"plan":$p.bill_key};"#,
+            r#"match (plan:$p,invoice:$i) isa bill_invoice_owner; fetch {"plan":$p.bill_key,"invoice":$i.bill_key};"#,
+            r#"match (invoice:$i,notice:$n) isa bill_notice_owner; fetch {"invoice":$i.bill_key,"notice":$n.bill_key};"#,
+            r#"match $i isa portal_invitation;(invitation:$i,tenant:$t) isa portal_invitation_owner; fetch {"id":$i.biz_id,"token_hash":$i.portal_token_hash,"used":$i.portal_used,"expiry":$i.portal_expires,"email":$i.email,"tenant":$t.biz_id};"#,
             r#"match $r isa auth_revocation; fetch {"key":$r.token_key};"#,
             r#"match $u isa user, has biz_id $id; fetch {"id":$id,"email":$u.email,"password":$u.password,"state":[$u.biz_state]};"#,
             r#"match $e isa biz_entitlement, links (tenant:$t,product:$p); fetch {"id":$e.biz_id,"tenant":$t.biz_id,"product":$p.biz_id,"state":$e.biz_state,"start":$e.biz_start,"end":[$e.biz_end]};"#,
