@@ -53,3 +53,13 @@ cargo test --locked --manifest-path server/Cargo.toml --lib hosted_bootstrap_bac
 ```
 
 Reference behavior: [OWASP password recovery](https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html), [Stripe invoice payments](https://docs.stripe.com/api/invoice-payment/list), [attached payments](https://docs.stripe.com/api/invoices/attach_payment), [refunds](https://docs.stripe.com/api/refunds/object), [disputes](https://docs.stripe.com/api/disputes/list), [sandbox fixtures](https://docs.stripe.com/testing).
+
+## Evidence from 2026-10-08
+
+On the existing free TypeDB Cloud cluster, the recovery test passed generic requests, cooldown, password validation, simultaneous token consumption, rejection of replay/other old links, old-session invalidation, old-password denial and fresh sign-in. The ordinary authentication/revocation regression also passed.
+
+Stripe sandbox passed a 1,000-cent invoice with two 500-cent payments, a 100-cent refund, and a 500-cent disputed payment. The API history test passed merchant/customer access and denied another tenant. No live charges were made.
+
+The bootstrap test passed concurrent first-owner creation (one winner), owner policy, private backup, corrupt-manifest rejection, fresh-target restore and refusal to overwrite. The full Cloud restore rehearsal compared 4,507 records including recovery ownership/version and payment-history snapshots, then removed its temporary database and local exports. Runtime preflight passed. These are observed checks, not certification of all future infrastructure failures.
+
+Mercury's [invoice API documentation](https://docs.mercury.com/docs/invoicing) describes invoice status and transaction-based reconciliation, including exact-amount virtual-account matching. The integration does not invent invoice allocations or card refund/dispute records from those bank transactions.

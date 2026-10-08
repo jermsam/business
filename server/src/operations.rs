@@ -186,8 +186,8 @@ pub async fn run() -> Result<()> {
    let tx=driver.transaction(&db,TransactionType::Read).await?;
    for (label,query) in [
     ("recovery",r#"match $r isa portal_recovery,has auth_status $s;{$s=="sending";} or {$s=="confirming";} or {$s=="attention";};fetch {"id":$r.biz_id,"status":$s};"#),
-    ("notices",r#"match $r isa bill_notice,has bill_status $s;not {$s=="sent";};fetch {"id":$r.bill_key,"status":$s};"#),
-    ("invoices",r#"match $r isa bill_invoice,has bill_status $s;{$s=="creating";} or {$s=="attention";};fetch {"id":$r.bill_key,"status":$s};"#)
+    ("notices",r#"match $r isa bill_notice,has bill_status $s;{$s=="sending";} or {$s=="attention";};fetch {"id":$r.bill_key,"status":$s};"#),
+    ("invoices",r#"match $r isa bill_invoice,has bill_status $s;{$s=="issuing";} or {$s=="attention";};fetch {"id":$r.bill_key,"status":$s};"#)
    ] {println!("{label}: {}",serde_json::to_string(&documents(&tx,query).await?)?);}
    tx.close().await?;
   },

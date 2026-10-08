@@ -31,6 +31,10 @@ async fn hosted_backup_restore_drill() {
             a.sort(); b.sort(); anyhow::ensure!(a==b,"Restored identity set differs for {kind}"); checked+=a.len();
         }
         for query in [
+            r#"match $r isa portal_recovery; fetch {"id":$r.biz_id,"key":$r.auth_request_key,"hash":[$r.portal_token_hash],"version":[$r.auth_version],"status":$r.auth_status,"used":$r.portal_used,"expiry":$r.portal_expires};"#,
+            r#"match (recovery:$r,person:$u) isa portal_recovery_owner; fetch {"id":$r.biz_id,"person":$u.biz_id};"#,
+            r#"match $u isa user; fetch {"id":$u.biz_id,"version":[$u.auth_version]};"#,
+            r#"match $i isa bill_invoice; fetch {"id":$i.bill_key,"history":[$i.bill_history]};"#,
             r#"match $c isa bill_customer; fetch {"id":$c.bill_key,"name":$c.name,"email":$c.bill_email,"policy":$c.bill_policy,"choice":$c.bill_choice,"provider":$c.bill_provider,"stripe":$c.bill_stripe_id,"mercury":$c.bill_mercury_id,"card":$c.bill_payment_method,"revision":$c.bill_revision,"consent":$c.bill_consent};"#,
             r#"match $p isa bill_plan; fetch {"id":$p.bill_key,"amount":$p.bill_amount,"anchor":$p.bill_anchor,"next":$p.bill_next,"sequence":$p.bill_sequence,"interval":$p.bill_interval,"days":$p.bill_due_days,"status":$p.bill_status};"#,
             r#"match $i isa bill_invoice; fetch {"id":$i.bill_key,"amount":$i.bill_amount,"provider":$i.bill_provider,"external":$i.bill_external_id,"revision":$i.bill_revision,"choice":$i.bill_choice,"status":$i.bill_status,"url":$i.bill_url,"due":$i.bill_next};"#,
