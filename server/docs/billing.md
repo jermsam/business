@@ -154,6 +154,16 @@ Local browser checks confirmed seller login/logout and a buyer seeing their paid
 sandbox invoice, with no administrative controls. The worker keeps backend tokens
 in an encrypted Secure/HttpOnly/SameSite cookie rather than browser-readable storage.
 
-This is not a live deployment. Hosted credential transfer awaits approval, and the
-website portal README tracks remaining launch requirements. Do not import real
-customers or activate live collection until those requirements are satisfied.
+The user approved hosted sandbox credential transfer. The free Render validation
+service now runs the billing branch, and the companion portal is deployed at
+https://jitpomi.com/account/. Cloudflare runs the authenticated scheduler every
+five minutes. HTTPS buyer login, logout, and paid invoice history were verified.
+A signed sandbox webhook probe returned HTTP 200 after the environment deployment;
+this probe is not proof of Stripe delivery. A hosted scheduler invocation returned
+HTTP 200 with zero errors and one receipt notification after correcting the
+synthetic customer billing email to the approved dev@jitpomi.com recipient.
+
+Browser-driven card setup/return and Stripe delivery verification remain unfinished.
+This is a sandbox deployment, not live customer billing. The website portal README
+tracks remaining launch requirements. Do not import real customers or activate live
+collection until those requirements are satisfied.
