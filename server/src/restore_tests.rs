@@ -31,6 +31,14 @@ async fn hosted_backup_restore_drill() {
             a.sort(); b.sort(); anyhow::ensure!(a==b,"Restored identity set differs for {kind}"); checked+=a.len();
         }
         for query in [
+            r#"match $r isa auth_revocation; fetch {"key":$r.token_key};"#,
+            r#"match $u isa user, has biz_id $id; fetch {"id":$id,"email":$u.email,"password":$u.password,"state":[$u.biz_state]};"#,
+            r#"match $e isa biz_entitlement, links (tenant:$t,product:$p); fetch {"id":$e.biz_id,"tenant":$t.biz_id,"product":$p.biz_id,"state":$e.biz_state,"start":$e.biz_start,"end":[$e.biz_end]};"#,
+            r#"match $g isa biz_grant, links (tenant:$t,grantee:$u,grantor:$v,project:$p); fetch {"id":$g.biz_id,"tenant":$t.biz_id,"grantee":$u.biz_id,"grantor":$v.biz_id,"project":$p.biz_id,"action":$g.action,"effect":$g.effect,"state":$g.biz_state,"start":$g.biz_start,"end":[$g.biz_end]};"#,
+            r#"match (tenant:$t,product:$p,project:$r) isa biz_project_owner; fetch {"tenant":$t.biz_id,"product":$p.biz_id,"project":$r.biz_id};"#,
+            r#"match (tenant:$t,team:$g) isa biz_team_owner; fetch {"tenant":$t.biz_id,"team":$g.biz_id};"#,
+            r#"match $m isa biz_team_member, links (team:$t,person:$u); fetch {"id":$m.biz_id,"team":$t.biz_id,"person":$u.biz_id,"state":$m.biz_state,"start":$m.biz_start,"end":[$m.biz_end]};"#,
+            r#"match (record:$r,project:$p,creator:$u) isa biz_record_owner; fetch {"record":$r.biz_id,"project":$p.biz_id,"creator":$u.biz_id};"#,
             r#"match $r isa business_record; fetch {"id":$r.record_id,"owner":$r.biz_person_id,"tenant":$r.biz_tenant_id,"name":$r.name};"#,
             r#"match $m isa biz_membership, links (tenant:$t,person:$u); let $ok=biz_private_authorized($u,$t,2026-10-08T00:00:00); fetch {"id":$m.biz_id,"role":$m.biz_role,"state":$m.biz_state,"allowed":$ok};"#,
         ] {

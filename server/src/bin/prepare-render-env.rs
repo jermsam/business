@@ -27,7 +27,7 @@ fn main() -> Result<()> {
         ensure!(!value.is_empty(), "Empty {key}");
         writeln!(file, "{key}={}", serde_json::to_string(value)?)?;
     }
-    writeln!(file,"HTTP_HOST=0.0.0.0\nHTTP_PORT=10000\nENVIRONMENT=production\nTYPEDB_DB=business_dev\nTYPEDB_TLS=true\nTYPEDB_FORCE_RECREATE=false")?;
+    writeln!(file,"BUSINESS_ACTIVE_REQUESTS=3\nHTTP_HOST=0.0.0.0\nHTTP_PORT=10000\nENVIRONMENT=production\nTYPEDB_DB=business_dev\nTYPEDB_TLS=true\nTYPEDB_FORCE_RECREATE=false")?;
     writeln!(
         file,
         "AUTH_JWT_SECRET={}{}",

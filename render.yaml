@@ -9,6 +9,8 @@ services:
     healthCheckPath: /health
     autoDeployTrigger: off
     envVars:
+      - key: BUSINESS_ACTIVE_REQUESTS
+        value: "3"
       - key: HTTP_HOST
         value: 0.0.0.0
       - key: HTTP_PORT

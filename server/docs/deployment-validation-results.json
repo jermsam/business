@@ -17,10 +17,11 @@
     "plan": "Free",
     "monthly_service_price_usd": 0,
     "service_id": "srv-db3tstrbc2fs73buj2dg",
-    "commit": "9b1e16974e1b7db7f13692d002ccc70ae8243fb5",
+    "commit": "dfd90b84ae42582fb654cdd09119205397047467",
     "url": "https://jitpomi-business-validation.onrender.com",
     "auto_deploy": "off",
-    "status": "live"
+    "status": "live",
+    "active_request_budget": 3
   },
   "production_certification": false,
   "policy_diagnostic_ms": {
@@ -78,20 +79,136 @@
     "initial_attempt": "Two overlapping restarts caused a 502 during cleanup DELETE; subsequent GET returned 404, showing the delete committed despite the failed response. Old session revoked. Fresh fixture and one confirmed restart passed."
   },
   "public_soak": {
-    "passed": false,
+    "passed": true,
     "tenants": 10,
     "concurrent_users": 10,
-    "duration_seconds": 303.052741542,
-    "cycles": 140,
-    "requests": 980,
+    "duration_seconds": 303.929634541,
+    "cycles": 210,
+    "requests": 1470,
     "required_requests": 1000,
     "unexpected_statuses": 0,
-    "p95_ms": 3493,
-    "p99_ms": 3798,
-    "max_ms": 5343,
+    "p95_ms": 2492,
+    "p99_ms": 2610,
+    "max_ms": 3343,
     "latency_gate_passed": true,
-    "throughput_gate_passed": false,
-    "transport": "public HTTPS via a separate curl process per request; real TypeDB Cloud",
-    "caveat": "Includes network, connection setup and test-client process overhead. Does not isolate application versus infrastructure capacity."
-  }
+    "throughput_gate_passed": true,
+    "transport": "public HTTPS via pooled reqwest; real TypeDB Cloud",
+    "active_request_budget": 3,
+    "admission_queue_p95_ms": 1738.1,
+    "handler_p95_ms": 701.5,
+    "model": "closed-loop, one user per tenant, 100 ms pause per cycle",
+    "caveat": "A preceding run with the same active budget failed with 503 responses. This pass does not erase that failure or establish an availability guarantee."
+  },
+  "admission_investigation": {
+    "unchanged_server_pooled_client": {
+      "requests": 980,
+      "seconds": 303.291553875,
+      "p95_ms": 3496,
+      "p99_ms": 3567,
+      "unexpected_statuses": 0,
+      "passed": false
+    },
+    "two_active_request_diagnostic": {
+      "duration_seconds": 43.327119875,
+      "requests": 140,
+      "queue_p95_ms": 2742.8,
+      "service_p95_ms": 718.7,
+      "acceptance_run": false
+    },
+    "change": "Validated configurable active request budget; validation deployment set to 3, waiting queue remains 32 and queue deadline remains 5 seconds",
+    "deployed_commit": "dfd90b84ae42582fb654cdd09119205397047467",
+    "three_active_short_diagnostic": {
+      "requests": 203,
+      "duration_seconds": 42.594621375,
+      "unexpected_statuses": 0,
+      "queue_p95_ms": 1744.0,
+      "service_p95_ms": 704.9,
+      "acceptance_run": false
+    }
+  },
+  "public_soak_history": [
+    {
+      "passed": false,
+      "tenants": 10,
+      "concurrent_users": 10,
+      "duration_seconds": 303.052741542,
+      "cycles": 140,
+      "requests": 980,
+      "required_requests": 1000,
+      "unexpected_statuses": 0,
+      "p95_ms": 3493,
+      "p99_ms": 3798,
+      "max_ms": 5343,
+      "latency_gate_passed": true,
+      "throughput_gate_passed": false,
+      "transport": "public HTTPS via a separate curl process per request; real TypeDB Cloud",
+      "caveat": "Includes network, connection setup and test-client process overhead. Does not isolate application versus infrastructure capacity."
+    },
+    {
+      "passed": false,
+      "active_request_budget": 3,
+      "failure": "Six workers observed unexpected HTTP 503 responses; run failed after 306.66 seconds. Response origin was not captured in this attempt; do not attribute it to infrastructure or exclude it from reliability evidence."
+    }
+  ],
+  "final_correctness": {
+    "passed": 14,
+    "failed": 0,
+    "elapsed_seconds": 144.01,
+    "public_https_suites": [
+      "hosted_auth_and_revocation",
+      "hosted_business_data_isolation",
+      "hosted_workspace_policy"
+    ],
+    "live_database_suites": [
+      "hosted_backup_restore_drill",
+      "hosted_connection_loss_and_timeout_recovery",
+      "hosted_identity_uniqueness_and_concurrency",
+      "hosted_migration_rejects_invalid_identity_and_ownership",
+      "hosted_protected_write_atomicity"
+    ],
+    "unit_tests": 6,
+    "backup_restore": "Expanded comparison of revocations, credentials, entitlements, grants, teams, ownership, identity sets and private policy results; temporary restored database deleted and private export removed."
+  },
+  "final_restart": {
+    "passed": true,
+    "verification_seconds": 4.07,
+    "confirmed_process_start": "2026-10-08T19:12:36Z",
+    "provider_process_marker": "bxknl",
+    "record_persisted": true,
+    "valid_session_persisted": true,
+    "revoked_session_rejected": true,
+    "fixture_record_deleted": true,
+    "remaining_session_logged_out": true
+  },
+  "bounded_deployment_acceptance_passed": true,
+  "public_soak_post_restart": {
+    "passed": true,
+    "tenants": 10,
+    "concurrent_users": 10,
+    "duration_seconds": 306.925204959,
+    "cycles": 213,
+    "requests": 1491,
+    "required_requests": 1000,
+    "unexpected_statuses": 0,
+    "p95_ms": 2404,
+    "p99_ms": 2511,
+    "max_ms": 2845,
+    "admission_queue_p95_ms": 1700.1,
+    "handler_p95_ms": 700.8,
+    "active_request_budget": 3,
+    "transport": "public HTTPS via pooled reqwest; real TypeDB Cloud",
+    "model": "closed-loop, one user per tenant, 100 ms pause per cycle"
+  },
+  "final_edge_checks": {
+    "https_health": 200,
+    "missing_token": 401,
+    "raw_query_route": 404,
+    "oversized_body": 400,
+    "oversized_body_message_verified": true,
+    "http_to_https_redirect": 301,
+    "tls_certificate_verification": true,
+    "client": "curl",
+    "tooling_note": "Local Python urllib lacked its CA trust chain; it was not used for the successful checks. TLS verification was never disabled."
+  },
+  "tracked_credential_scan": "Passed: no configured TypeDB password or JWT signing secret in 90 tracked files"
 }

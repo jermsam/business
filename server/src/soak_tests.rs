@@ -68,18 +68,22 @@ async fn run_business_soak(seconds:u64, minimum_requests:usize) {
             (cycles,times)
         }));
     }
-    let results:Vec<_>=futures::future::join_all(workers).await.into_iter().map(Result::unwrap).collect();
+    let joined=futures::future::join_all(workers).await;
+    {
+        let timing=REMOTE_TIMINGS.lock().unwrap();
+        if !timing.is_empty() {
+            let mut queue:Vec<f64>=timing.iter().map(|t|t.0).collect();
+            let mut service:Vec<f64>=timing.iter().map(|t|t.1).collect();
+            queue.sort_by(f64::total_cmp); service.sort_by(f64::total_cmp);
+            println!("ADMISSION_TIMING count={} queue_p95_ms={:.1} service_p95_ms={:.1}",timing.len(),queue[(queue.len()-1)*95/100],service[(service.len()-1)*95/100]);
+        }
+    }
+    let results:Vec<_>=joined.into_iter().map(Result::unwrap).collect();
     let cycles:usize=results.iter().map(|r|r.0).sum();
     let mut latencies:Vec<u64>=results.into_iter().flat_map(|r|r.1).collect(); latencies.sort_unstable();
     let p95=latencies[(latencies.len()-1)*95/100]; let p99=latencies[(latencies.len()-1)*99/100];
     let report=json!({"tenants":10,"concurrent_users":10,"http_client":std::env::var("BUSINESS_TEST_HTTP_CLIENT").unwrap_or_else(|_|"reqwest-pooled".into()),"duration_seconds":start.elapsed().as_secs_f64(),"cycles":cycles,"requests":latencies.len(),"unexpected_statuses":0,"p95_ms":p95,"p99_ms":p99,"max_ms":latencies.last(),"database":"business_dev","transport":std::env::var("BUSINESS_TEST_BASE_URL").map(|base|format!("public HTTPS {base}; real TypeDB Cloud")).unwrap_or_else(|_|"in-process Axum router; real TypeDB Cloud".into()),"model":"closed-loop, one user per tenant, 100 ms pause per cycle"});
     println!("BUSINESS_SOAK {report}");
-    let timing=REMOTE_TIMINGS.lock().unwrap();
-    if !timing.is_empty() {
-        let mut queue:Vec<f64>=timing.iter().map(|t|t.0).collect();let mut service:Vec<f64>=timing.iter().map(|t|t.1).collect();
-        queue.sort_by(f64::total_cmp);service.sort_by(f64::total_cmp);
-        println!("ADMISSION_TIMING count={} queue_p95_ms={:.1} service_p95_ms={:.1}",timing.len(),queue[(queue.len()-1)*95/100],service[(service.len()-1)*95/100]);
-    }
     // Provisional bounded launch gate, not the unrelated DogRS queue benchmark.
     assert!(latencies.len()>=minimum_requests,"Insufficient throughput for provisional baseline");
     assert!(p95<=5000 && p99<=10000,"Latency gate failed");

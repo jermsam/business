@@ -22,8 +22,14 @@ async fn remote_call(base: &str, tenant: &str, method: &str, path: &str, data: V
         let mut parts=timing.split(", ").filter_map(|p|p.split_once(";dur=").and_then(|(_,v)|v.parse::<f64>().ok()));
         if let (Some(queue),Some(service))=(parts.next(),parts.next()) {REMOTE_TIMINGS.lock().unwrap().push((queue,service));}
     }
+    let has_timing=response.headers().contains_key("server-timing");
     let bytes=response.bytes().await.expect("Public HTTPS response body failed");
-    (status,serde_json::from_slice(&bytes).unwrap_or(Value::Null))
+    let body:Value=serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    if status>=500 {
+        let admission=body.get("message").and_then(Value::as_str)==Some("Service busy; request was not started");
+        eprintln!("REMOTE_FAILURE status={status} admission_rejected={admission} handler_timing_present={has_timing}");
+    }
+    (status,body)
 }
 // Optional public HTTPS transport for the existing hosted acceptance suites.
 // Request bodies and bearer tokens travel through stdin, never process arguments.

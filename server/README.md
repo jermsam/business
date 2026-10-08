@@ -41,10 +41,11 @@ Business databases; development login, wrong-tenant rejection for local login an
 logout/revocation, blocked raw queries, and concurrent refresh consumption pass.
 
 Remaining release work includes authorization for additional domain services, abuse/rate limiting,
-backup/export procedures and hosted HTTP deployment. This
-foundation migration alone is not a production-readiness certification. Both dev
-and prod configurations passed cloud-backed startup and HTTP health checks; neither
-HTTP server is left running or publicly exposed.
+scheduled backup retention and broader availability requirements. The foundation is now
+publicly deployed on Render Free against `business_dev`; the live validation record
+is in `docs/production-validation-progress.md`. Backup restoration has been tested,
+but the drill is not a scheduled off-cluster backup service. A bounded acceptance
+pass is not a certification of every future domain service or always-on hosting.
 
 ## Tenant-scoped private records
 
@@ -112,7 +113,7 @@ See [Workspace access implementation](docs/workspace-access.md) for the new Type
 
 ## Deployment validation
 
-See [current deployment validation evidence](docs/production-validation-progress.md) for recovery, restore, policy-query measurements and the remaining deployment/load gates. The Render blueprint uses only the free plan. Do not infer full production validation from the correctness tests alone.
+See [current deployment validation evidence](docs/production-validation-progress.md) for recovery, restore, policy-query measurements and deployment/load results. The Render blueprint uses only the free plan. Do not infer full production validation from the correctness tests alone.
 
 The ignored hosted HTTP suites can target the validation deployment by setting
 `BUSINESS_TEST_BASE_URL=https://jitpomi-business-validation.onrender.com` alongside
@@ -130,3 +131,34 @@ and logout, then removes its record and logs out the remaining token. A failed
 mutation response can mean the write committed: inspect the saved resource before
 retrying; this harness does not automatically retry writes. Do not commit fixture
 files or place them in the public repository.
+
+The validation deployment and development environment use
+`BUSINESS_ACTIVE_REQUESTS=3`. This limits active database-backed HTTP requests per
+process; at most 32 more can wait, for up to five seconds. Startup rejects active
+budgets outside 1–32. The library fallback is two when the setting is absent.
+`Server-Timing` reports admission wait and handler duration without identity or
+query data. Health checks bypass admission. These limits are per process, not a
+global rate limit or an authentication brute-force defense.
+
+Public acceptance tests now reuse a reqwest HTTPS connection pool, with certificate
+verification enabled, redirects disabled and automatic retries disabled. Use
+`BUSINESS_TEST_HTTP_CLIENT=curl` to reproduce the original per-request curl mode.
+`hosted_admission_diagnostics` is a short attribution run, not an acceptance pass.
+The full `hosted_business_soak` gate remains ten tenants, ten users, five minutes,
+at least 1,000 requests, p95 <= 5 seconds and p99 <= 10 seconds, with no unexpected
+responses. Keep these modes distinct in reports.
+
+
+Run the public correctness/restore suite serially, then the load gate separately
+so the restore and concurrency drills do not contaminate capacity measurements:
+
+```sh
+export BUSINESS_ENV_FILE="$HOME/.config/jitpomi/business/render-validation.env"
+export BUSINESS_TEST_BASE_URL=https://jitpomi-business-validation.onrender.com
+cargo test --locked --lib -- --include-ignored --test-threads=1 --nocapture --skip hosted_business_soak --skip hosted_admission_diagnostics --skip hosted_policy_query_diagnostics --skip public_restart_
+cargo test --locked --lib hosted_business_soak -- --ignored --nocapture
+```
+
+The restart pair additionally requires the controlled provider restart described
+above. Preserve failed attempts in the evidence; do not retry mutations or lower
+the acceptance thresholds to turn a failed run into a pass.
