@@ -1,0 +1,47 @@
+define
+attribute biz_id, value string;
+attribute biz_state, value string @values("active", "suspended");
+attribute biz_start, value datetime;
+attribute biz_end, value datetime;
+# Optional unique IDs allow additive backfill of existing identities.
+user owns biz_id @unique;
+company owns biz_id @unique;
+entity biz_product, owns biz_id @key, owns name @card(1);
+entity biz_team sub subject, owns biz_id @key, owns name @card(1);
+entity biz_project, owns biz_id @key, owns name @card(1);
+entity biz_record, owns biz_id @key, owns name @card(1);
+relation biz_membership,
+ owns biz_id @key, owns biz_state @card(1), owns biz_start @card(1), owns biz_end,
+ relates tenant @card(1), relates person @card(1);
+company plays biz_membership:tenant;
+user plays biz_membership:person;
+relation biz_entitlement,
+ owns biz_id @key, owns biz_state @card(1), owns biz_start @card(1), owns biz_end,
+ relates tenant @card(1), relates product @card(1);
+company plays biz_entitlement:tenant;
+biz_product plays biz_entitlement:product;
+relation biz_team_owner, relates tenant @card(1), relates team @card(1);
+company plays biz_team_owner:tenant;
+biz_team plays biz_team_owner:team @card(1);
+# Nested teams are intentionally unsupported; only users can be members.
+relation biz_team_member,
+ owns biz_id @key, owns biz_state @card(1), owns biz_start @card(1), owns biz_end,
+ relates team @card(1), relates person @card(1);
+biz_team plays biz_team_member:team;
+user plays biz_team_member:person;
+relation biz_project_owner, relates tenant @card(1), relates product @card(1), relates project @card(1);
+company plays biz_project_owner:tenant;
+biz_product plays biz_project_owner:product;
+biz_project plays biz_project_owner:project @card(1);
+relation biz_grant,
+ owns biz_id @key, owns biz_state @card(1), owns biz_start @card(1), owns biz_end,
+ owns action @card(1), owns effect @card(1),
+ relates tenant @card(1), relates grantee @card(1), relates project @card(1), relates grantor @card(1);
+company plays biz_grant:tenant;
+user plays biz_grant:grantee, plays biz_grant:grantor;
+biz_team plays biz_grant:grantee;
+biz_project plays biz_grant:project;
+relation biz_record_owner, relates project @card(1), relates creator @card(1), relates record @card(1);
+biz_project plays biz_record_owner:project;
+user plays biz_record_owner:creator;
+biz_record plays biz_record_owner:record @card(1);

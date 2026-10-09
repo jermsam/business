@@ -1,0 +1,7 @@
+define
+  attribute record_id, value string;
+  entity business_record,
+    owns record_id @key,
+    owns company_domain @card(1..1),
+    owns email @card(1..1),
+    owns name @card(1..1);

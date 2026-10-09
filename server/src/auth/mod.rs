@@ -1,40 +1,29 @@
 use crate::services::BusinessParams;
 use anyhow::Result;
 use dog_auth::{AuthOptions, AuthStrategy, AuthenticationService};
-use dog_auth_local::LocalStrategy;
-use dog_core::DogApp;
+use dog_core::DogAppBuilder;
 use serde_json::Value;
 use std::sync::Arc;
-
-pub mod authorization;
 pub mod jwt;
 pub mod local;
+pub mod token_store;
 
-pub fn strategies(dog_app: &DogApp<Value, BusinessParams>) -> Result<()> {
+pub fn strategies(
+    builder: &mut DogAppBuilder<Value, BusinessParams>,
+) -> Result<Arc<dog_auth::AuthServiceAdapter<BusinessParams>>> {
     let mut opts = AuthOptions {
-        strategies: vec![
-            AuthStrategy::Jwt,
-            // AuthStrategy::OAuth,
-            AuthStrategy::Custom("local".to_string()),
-        ],
-        ..AuthOptions::default()
+        strategies: vec![AuthStrategy::Jwt, AuthStrategy::Custom("local".into())],
+        ..Default::default()
     };
-
-    opts.jwt.secret = dog_app.get::<String>("auth.jwt.secret");
-    opts.service = dog_app.get::<String>("auth.service");
-    opts.entity = dog_app.get::<String>("auth.entity");
-
-    let auth = Arc::new(AuthenticationService::new(dog_app.clone(), Some(opts))?);
-    AuthenticationService::install(dog_app, auth.clone());
-
-    jwt::register_jwt(&auth);
-
-    let local_strategy: Arc<LocalStrategy<BusinessParams>> =
-        local::register_local(Arc::clone(&auth));
-    dog_app.set("auth.local", Arc::clone(&local_strategy));
-
-    // let google_authorize_url = oauth2::google::register_google_oauth(Arc::clone(&auth))?;
-    // dog_app.set("oauth.google.authorize_url", google_authorize_url);
-
-    Ok(())
+    opts.jwt.secret = builder.get("auth.jwt.secret");
+    opts.entity = Some("user".into());
+    let state = builder
+        .get::<Arc<crate::typedb::TypeDBState>>("typedb")
+        .ok_or_else(|| anyhow::anyhow!("TypeDB not initialized"))?;
+    let mut auth = AuthenticationService::builder(builder, Some(opts))?
+        .with_token_store(Arc::new(token_store::TypeDbTokenStore::new(state.clone())));
+    jwt::register_jwt(&mut auth, state.clone());
+    local::register_local(&mut auth, state);
+    let service = Arc::new(AuthenticationService::new(Arc::new(auth.build())));
+    Ok(AuthenticationService::install(builder, service))
 }

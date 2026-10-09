@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-08",
+  "database": "business_dev",
+  "driver": "3.13.6",
+  "tests": {
+    "passed": 8,
+    "failed": 0,
+    "ignored": 0,
+    "elapsed_seconds": 124.31
+  },
+  "clippy": "passed with -D warnings",
+  "production_changed": false,
+  "sha256": {
+    "Cargo.lock": "99cdc76ccf30d4e9997ef5ab5a4cd19a7a9c5857b4428fa8fef79fc27456c71b",
+    "migrations/002-workspace-access.tql": "433554dd69688535eb0eaba762d5763531428cf77aa5fee3b02bdae798ca6062",
+    "migrations/003-account-lifecycle.tql": "7d2f3e9e86f5d2f902ff5320bce044256b326ef970e9b559bdd596e57f0b06c1",
+    "src/app.rs": "90640a2fa550d2886f3c1cd8aee9f5a57ef4721acfdd00bf60376a43e0ecda24",
+    "src/auth/local.rs": "42862e023e3c0d33fe9e9064505e73c99ebba62bb79cb3f9a523cfb8de08ddae",
+    "src/bin/database.rs": "6ffb461431703109d7178e15699e5f5a601509e3df61233eeb88c0e2f2c3d654",
+    "src/services/apps/apps_hooks.rs": "d959d26cfffca51809c66ca9009ce73cd5dfb4a78d06ca751efcd02f680e0424",
+    "src/services/apps/apps_schema.rs": "80572a36cec8fbf6348504c5f45086b65eee729eb05fc7c96340bb7144b920f2",
+    "src/services/apps/apps_service.rs": "df841e5d6569ff6630a9db6d6377ed19c895e091dc0348f0e817eb2bf08ab567",
+    "src/services/apps/apps_shared.rs": "3541c70ae042210891965268221763b032a0a855e807d1d2590ee5769efabf29",
+    "src/services/apps/mod.rs": "535bdb2534f2deb9569677c7458dda8fba98ccebd2732676f5a6f8109347503b",
+    "src/services/mod.rs": "7c9654f4c05f88963b66da3982cb0ae63599f10cdb688a971a62ccde362ecb20",
+    "src/services/records/records_service.rs": "35aa219da57964cae7fe8db580b53fd21a6f2400fb417672e71d3fcd840324e1",
+    "src/services/workspace/mod.rs": "144c3d22ec5a01055d5d929cf337317c05ed30e304c92ed916b23056a5922019",
+    "src/services/workspace/workspace_hooks.rs": "a81f138de514cb2e7011f486ff0d18e3caa3f85cc71470b55bfaacb8c53e9350",
+    "src/services/workspace/workspace_schema.rs": "6292ac5ac4071db8b2ef91f56b7b3d568d51b248a20f39a4166c8f9ffaeebf89",
+    "src/services/workspace/workspace_service.rs": "3002a2d408d96a5e99a8ee46da8194465eadd130e36183926c788d62d7b5df83",
+    "src/services/workspace/workspace_shared.rs": "69023f5cd8fd65950c3151947ced79c08176430ee421466758501fad259b74b1",
+    "src/workspace_tests.rs": "4742d893a54a2600d0bf3cd3ac9d524f35d927208a973c7e313764468813398a",
+    "workspace-functions.tql": "04137e116fdab8f3ec550c98f04f4bb9edd8f80cf0eab2df355b73979bb481c8"
+  }
+}

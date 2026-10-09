@@ -1,8 +1,8 @@
 use crate::services::BusinessParams;
 use anyhow::Result;
-use dog_core::DogApp;
+use dog_core::DogAppBuilder;
 use serde_json::Value;
 
-pub fn channels(_app: &DogApp<Value, BusinessParams>) -> Result<()> {
+pub fn channels(_app: &mut DogAppBuilder<Value, BusinessParams>) -> Result<()> {
     Ok(())
 }
