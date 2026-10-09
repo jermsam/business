@@ -1,6 +1,6 @@
 # Business billing — implementation and validation
 
-Work in progress, 2026-10-08. **Sandbox integration, not approved for live customer billing.** Existing Render deployment has not been changed. No live payment keys were obtained, no real payments made, and no paid plan selected.
+**Sandbox integration, not approved for live customer billing.** Render, the jitpomi.com portal and the five-minute scheduler are deployed in sandbox mode. See [the current audit and launch gates](launch-audit-2026-10-08.md). Dated validation entries below are historical evidence, not a current deployment checklist. No live payment keys were obtained, no real payments made, and no paid plan selected.
 
 ## Product behavior
 
@@ -18,7 +18,7 @@ Work in progress, 2026-10-08. **Sandbox integration, not approved for live custo
 
 There is no fixed monthly subscription selected by this implementation. Payment processing and product usage charges can still apply. Mercury's current pricing table includes programmatic invoicing in its $0 plan; receiving ACH debits is a separate paid-plan capability and is disabled in requests. Card acceptance through Mercury requires its Stripe connection. Mercury API invoices use `SendNow` on their scheduled creation date.
 
-Stripe charges processing fees and can charge Invoicing/Billing usage fees. Do not equate $0 setup/monthly commitment with fee-free transactions. Resend has a free tier with sending limits; no automatic paid upgrade is implemented or authorized. Sending is disabled until an account, verified sender and free-tier limits are confirmed.
+Stripe charges processing fees and can charge Invoicing/Billing usage fees. Do not equate $0 setup/monthly commitment with fee-free transactions. Resend has a free tier with sending limits; no automatic paid upgrade is implemented or authorized. Sandbox sending is configured through the verified sender and restricted to dev@jitpomi.com. Live customer sending and free-tier exhaustion/bounce handling still require launch validation.
 
 Primary references reviewed:
 - [Mercury pricing](https://mercury.com/pricing)
@@ -42,7 +42,7 @@ Primary references reviewed:
 
 Protected DogRS services: `/billing-customers`, `/billing-plans`, `/billing-invoices`, `/billing-actions`. TypeQL policy functions check current owner membership in the seller or linked buyer company. Invoices are read-only to API callers. Provider keys serve only `BILLING_MERCHANT_ID`; this is JITPOMI billing its customers, not a payment marketplace using one secret for arbitrary sellers.
 
-`BILLING_ENABLED=true` enables `/internal/billing/tick` and `/webhooks/stripe`. The tick endpoint requires its own long random secret and allows one active invocation per process. TypeDB claims also protect across processes. The supplied Cloudflare scheduled Worker invokes it every five minutes; it is prepared but **not deployed**. Render free-host sleep/cold starts mean dates are scheduling intentions, not a precise delivery-time SLA. A tick has a 50-second deadline; unfinished claims require reconciliation.
+`BILLING_ENABLED=true` enables `/internal/billing/tick` and `/webhooks/stripe`. The tick endpoint requires its own long random secret and allows one active invocation per process. TypeDB claims also protect across processes. The supplied Cloudflare scheduled Worker invokes it every five minutes; it is deployed against the sandbox validation service. Render free-host sleep/cold starts mean dates are scheduling intentions, not a precise delivery-time SLA. A tick has a 50-second deadline; unfinished claims require reconciliation.
 
 Apply `database migrate-billing` only to `business_dev` first. The command supports repeating schema definitions and redefining functions atomically. The migration is not run implicitly at server startup.
 
@@ -64,17 +64,12 @@ BILLING_PROVIDER_TEST=true cargo test --locked --lib hosted_billing_isolation_an
 
 The combined database/provider test inserts a trusted synthetic saved-card fixture after verifying a Stripe test SetupIntent. It verifies scheduling, concurrent collection and paid reconciliation; **it is not proof that the customer's browser setup/return journey has passed**.
 
-## Remaining launch gates
+## Current launch gates
 
-- Browser-to-Checkout-to-Business consent confirmation, decline/expired-card/3DS cases, and exact consent wording need full acceptance testing.
-- Deploy the validated build and scheduler, register the real sandbox webhook endpoint, then replay signed webhook deliveries through the public HTTPS path.
-- Create/verify the free email sender and test actual delivery, bounce handling and free-tier exhaustion. No real customer email is enabled yet.
-- Test recovery of each uncertain external write. A saved draft ID is retained before item/finalize calls; failures are stopped for operator reconciliation. Unknown create outcomes must be located by metadata/invoice number. Never create a replacement invoice just because a request timed out. There is not yet an operator recovery UI.
-- Verify Mercury hosted invoice URL and real card acceptance/Stripe connection in the sandbox. `Paid` can be an out-of-band mark, so the acknowledgment says the invoice is marked paid; it is not a bank-settlement certificate.
-- Decide and implement the desired catch-up policy after prolonged downtime or a paused recurring schedule. Current scheduling catches up due occurrences in bounded batches; do not enable it for live billing without explicit acceptance of that behavior.
-- Review taxes, invoice legal identity, cancellation/refund/dispute handling, pagination beyond 100 UI records and operational alerting before live use.
-
-No claim of full production readiness is made by passing these initial sandbox checks.
+Use [the current audit](launch-audit-2026-10-08.md) for the remaining work. Password
+recovery, onboarding, Stripe history and the operator invoice-reconciliation action
+are implemented; the evidence below records their validation. They do not by
+themselves certify a live production deployment.
 
 ### Email validation — 2026-10-08
 
@@ -213,10 +208,9 @@ Stripe sandbox payment/email flow passed in 30.98 seconds: invoice
 new notices or payment attempts. Email acceptance is not inbox-delivery certification.
 These tests used current local code, sandbox payments, and only dev@jitpomi.com.
 
-Remaining launch blockers: production database/merchant bootstrap and migration,
-secure customer password recovery, explicit refunds/disputes/partial-payment history,
-operator handling of uncertain mail delivery, and an exercised production restore
-and support procedure. Free-host cold starts also affect availability. Keep
+At this earlier audit, recovery and payment history were still pending; subsequent
+implementation and tests supersede those two items. The current launch gates are
+maintained in [the audit report](launch-audit-2026-10-08.md). Keep
 `BILLING_LIVE=false`; these audit fixes do not constitute live-launch approval.
 
 

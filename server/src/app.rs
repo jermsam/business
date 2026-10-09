@@ -125,6 +125,11 @@ mod live_tests {
             .uri(path)
             .header("content-type", "application/json")
             .header("x-tenant-id", tenant);
+        // Exercise the configured portal protection in local Cloud-backed tests
+        // instead of requiring operators to disable it for the acceptance suite.
+        if let Ok(secret) = std::env::var("PORTAL_ORIGIN_SECRET") {
+            req = req.header("x-portal-secret", secret);
+        }
         if path == "/subjects" {
             req = req.header("x-service-method", "read");
         }

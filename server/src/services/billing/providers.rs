@@ -146,10 +146,16 @@ impl Providers {
             "Configure a trusted HTTPS billing return URL"
         );
         let form=pairs(&[("mode","setup"),("customer",customer),("payment_method_types[0]","card"),("success_url",&format!("{base}?customer={id}&setup={{CHECKOUT_SESSION_ID}}")),("cancel_url",&base),("client_reference_id",id),("setup_intent_data[metadata][business_customer]",id),("setup_intent_data[metadata][business_revision]",revision),("setup_intent_data[metadata][business_actor]",actor),("custom_text[submit][message]","By saving this card, you authorize automatic payment of the billing schedules you reviewed. You can disable automatic payments in your billing page."),("consent_collection[payment_method_reuse_agreement][position]","auto")]);
+        // A new customer interaction needs a fresh setup session, even when the
+        // reviewed terms have not changed. Reusing a terms-only idempotency key
+        // returns Stripe's cached (possibly expired/completed) session. This is
+        // setup-only: it cannot charge, and consent still requires server-side
+        // verification of the actor, customer and current terms revision.
+        let attempt = uuid::Uuid::new_v4();
         self.stripe(
             Method::POST,
             "/checkout/sessions",
-            &format!("setup-{id}-{revision}-{actor}"),
+            &format!("setup-{id}-{attempt}"),
             &form,
         )
         .await
@@ -406,6 +412,69 @@ pub fn decimal_cents(value: &Value) -> Result<i64> {
 #[cfg(test)]
 mod live_tests {
     use super::*;
+    #[tokio::test]
+    #[ignore = "Requires approved Stripe sandbox key; creates and expires setup sessions only"]
+    async fn stripe_sandbox_setup_retry_after_expiration() {
+        dotenvy::from_path(std::env::var("BILLING_TEST_ENV").unwrap()).unwrap();
+        let providers = Providers::new().unwrap();
+        assert!(!providers.live);
+        let id = uuid::Uuid::new_v4().to_string();
+        let customer = providers
+            .customer(
+                Provider::Stripe,
+                &id,
+                "Setup retry validation",
+                "setup-validation@example.com",
+            )
+            .await
+            .unwrap();
+        let first = providers
+            .setup(&customer, &id, "unchanged-terms", "test-actor")
+            .await
+            .unwrap();
+        let first_id = field(&first, "id").unwrap();
+        providers
+            .stripe(
+                Method::POST,
+                &format!("/checkout/sessions/{first_id}/expire"),
+                &format!("expire-{first_id}"),
+                &[],
+            )
+            .await
+            .unwrap();
+        let retry = providers
+            .setup(&customer, &id, "unchanged-terms", "test-actor")
+            .await
+            .unwrap();
+        let retry_id = field(&retry, "id").unwrap();
+        let observed = providers
+            .stripe(
+                Method::GET,
+                &format!("/checkout/sessions/{retry_id}"),
+                "",
+                &[],
+            )
+            .await
+            .unwrap();
+        // Clean up before assertions even when the regression returns the expired session.
+        if observed["status"] == "open" {
+            providers
+                .stripe(
+                    Method::POST,
+                    &format!("/checkout/sessions/{retry_id}/expire"),
+                    &format!("expire-{retry_id}"),
+                    &[],
+                )
+                .await
+                .unwrap();
+        }
+        assert_ne!(
+            first_id, retry_id,
+            "Retry must not reuse an expired Checkout session"
+        );
+        assert_eq!(observed["status"], "open");
+        trusted_url(field(&retry, "url").unwrap(), "checkout.stripe.com").unwrap();
+    }
     #[tokio::test]
     #[ignore = "Requires explicitly approved local Stripe sandbox key"]
     async fn stripe_sandbox_invoice_lifecycle() {
