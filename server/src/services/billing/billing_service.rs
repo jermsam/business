@@ -59,7 +59,7 @@ impl BillingService {
         Ok(rows.remove(0))
     }
 }
-pub const CUSTOMER: &str = r#"fetch {"id":$c.bill_key,"name":$c.name,"email":$c.bill_email,"policy":$c.bill_policy,"choice":$c.bill_choice,"manual_provider":$c.bill_provider,"revision":$c.bill_revision};"#;
+pub const CUSTOMER: &str = r#"fetch {"id":$c.bill_key,"name":$c.name,"email":$c.bill_email,"policy":$c.bill_policy,"choice":$c.bill_choice,"manual_provider":$c.bill_provider,"revision":$c.bill_revision,"payment_method":$c.bill_payment_method};"#;
 pub const PLAN: &str = r#"fetch {"id":$p.bill_key,"customer_id":$c.bill_key,"description":$p.name,"amount_cents":$p.bill_amount,"currency":"USD","start_at":$p.bill_anchor,"next_at":$p.bill_next,"interval":$p.bill_interval,"due_days":$p.bill_due_days,"status":$p.bill_status};"#;
 pub const INVOICE: &str = r#"fetch {"id":$i.bill_key,"customer_id":$c.bill_key,"description":$i.name,"amount_cents":$i.bill_amount,"currency":"USD","issued_at":$i.bill_anchor,"due_at":$i.bill_next,"status":$i.bill_status,"mode":$i.bill_choice,"provider":$i.bill_provider,"payment_url":$i.bill_url};"#;
 #[async_trait]
