@@ -128,26 +128,6 @@ impl Providers {
         };
         Ok(field(&result, "id")?.to_owned())
     }
-    pub async fn setup(
-        &self,
-        customer: &str,
-        id: &str,
-        revision: &str,
-        actor: &str,
-    ) -> Result<Value> {
-        self.setup_mode(customer, id, revision, actor, false).await
-    }
-    pub async fn setup_mode(
-        &self,
-        customer: &str,
-        id: &str,
-        revision: &str,
-        actor: &str,
-        save_only: bool,
-    ) -> Result<Value> {
-        self.setup_method(customer, id, revision, actor, save_only, "card")
-            .await
-    }
     pub async fn setup_method(
         &self,
         customer: &str,
@@ -547,7 +527,14 @@ mod live_tests {
             .await
             .unwrap();
         let first = providers
-            .setup(&customer, &id, "unchanged-terms", "test-actor")
+            .setup_method(
+                &customer,
+                &id,
+                "unchanged-terms",
+                "test-actor",
+                false,
+                "card",
+            )
             .await
             .unwrap();
         let first_id = field(&first, "id").unwrap();
@@ -561,7 +548,14 @@ mod live_tests {
             .await
             .unwrap();
         let retry = providers
-            .setup_mode(&customer, &id, "unchanged-terms", "test-actor", true)
+            .setup_method(
+                &customer,
+                &id,
+                "unchanged-terms",
+                "test-actor",
+                true,
+                "card",
+            )
             .await
             .unwrap();
         let retry_id = field(&retry, "id").unwrap();
@@ -700,7 +694,7 @@ mod live_tests {
             .await
             .unwrap();
         let checkout = providers
-            .setup(&customer, &id, "test-revision", "test-actor")
+            .setup_method(&customer, &id, "test-revision", "test-actor", false, "card")
             .await
             .unwrap();
         assert_eq!(checkout["mode"], "setup");
