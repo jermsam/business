@@ -33,6 +33,9 @@ impl Actions {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Action {
+    PaymentMethod {
+        customer_id: String,
+    },
     History {
         invoice_id: String,
     },
@@ -126,9 +129,9 @@ impl DogService<Value, BusinessParams> for Actions {
             return Ok(json!({"reconciled":true}));
         }
         let customer_id = match &action {
-            Action::SetupCard { customer_id, .. } | Action::ConfirmCard { customer_id, .. } => {
-                schema::id(customer_id)?
-            }
+            Action::SetupCard { customer_id, .. }
+            | Action::ConfirmCard { customer_id, .. }
+            | Action::PaymentMethod { customer_id } => schema::id(customer_id)?,
             Action::ReconcileInvoice { .. } | Action::History { .. } => unreachable!(),
         };
         let permitted = format!(
@@ -151,6 +154,18 @@ impl DogService<Value, BusinessParams> for Actions {
         let actor = string(row, "actor")?;
         let revision = string(row, "revision")?;
         match action {
+            Action::PaymentMethod { .. } => {
+                let method = string(row, "payment_method")?;
+                if method.is_empty() {
+                    return Ok(json!(null));
+                }
+                providers::safe_id(method)?;
+                let value = engine
+                    .providers
+                    .stripe(Method::GET, &format!("/payment_methods/{method}"), "", &[])
+                    .await?;
+                payment_method_summary(&value, string(row, "stripe_id")?)
+            }
             Action::ReconcileInvoice { .. } | Action::History { .. } => unreachable!(),
             Action::SetupCard {
                 expected_revision,
@@ -296,5 +311,47 @@ impl DogService<Value, BusinessParams> for Actions {
                 Ok(rows.remove(0))
             }
         }
+    }
+}
+
+// Only recognizable display details cross the API boundary; never return the provider object.
+fn payment_method_summary(value: &Value, customer: &str) -> Result<Value> {
+    ensure!(
+        !customer.is_empty() && value["customer"].as_str() == Some(customer),
+        "Payment method customer mismatch"
+    );
+    let kind = providers::field(value, "type")?;
+    ensure!(
+        matches!(kind, "card" | "us_bank_account"),
+        "Unsupported saved payment method"
+    );
+    let details = &value[kind];
+    let last4 = providers::field(details, "last4")?;
+    ensure!(
+        last4.len() == 4 && last4.bytes().all(|c| c.is_ascii_digit()),
+        "Invalid payment method details"
+    );
+    Ok(if kind == "card" {
+        json!({"type":kind,"brand":details["brand"],"last4":last4,"exp_month":details["exp_month"],"exp_year":details["exp_year"]})
+    } else {
+        json!({"type":kind,"bank_name":details["bank_name"],"last4":last4,"account_type":details["account_type"]})
+    })
+}
+#[cfg(test)]
+mod display_tests {
+    use super::*;
+    #[test]
+    fn saved_method_display_is_customer_bound_and_allowlisted() {
+        let card = json!({"customer":"cus_owner","type":"card","card":{"brand":"visa","last4":"4242","exp_month":12,"exp_year":2030,"fingerprint":"private"},"billing_details":{"email":"private"}});
+        assert_eq!(
+            payment_method_summary(&card, "cus_owner").unwrap(),
+            json!({"type":"card","brand":"visa","last4":"4242","exp_month":12,"exp_year":2030})
+        );
+        assert!(payment_method_summary(&card, "cus_other").is_err());
+        let bank = json!({"customer":"cus_owner","type":"us_bank_account","us_bank_account":{"bank_name":"Test Bank","last4":"6789","account_type":"checking","routing_number":"private"}});
+        assert_eq!(
+            payment_method_summary(&bank, "cus_owner").unwrap(),
+            json!({"type":"us_bank_account","bank_name":"Test Bank","last4":"6789","account_type":"checking"})
+        );
     }
 }
