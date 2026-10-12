@@ -513,10 +513,10 @@ async fn hosted_customer_onboarding() {
     assert_eq!(s, 401, "Invitation replay denied");
     let (s, buyer) = call(
         http.clone(),
-        tenant,
+        "account",
         "POST",
         "/authentication",
-        json!({"strategy":"local","email":email,"password":"test-only-password-123"}),
+        json!({"strategy":"account","email":email,"password":"test-only-password-123"}),
         None,
     )
     .await;
