@@ -164,7 +164,14 @@ impl DogService<Value, BusinessParams> for Actions {
                     .providers
                     .stripe(Method::GET, &format!("/payment_methods/{method}"), "", &[])
                     .await?;
-                payment_method_summary(&value, string(row, "stripe_id")?)
+                let mut summary = payment_method_summary(&value, string(row, "stripe_id")?)?;
+                summary["automatic_enabled"] = json!(
+                    row["policy"] != "manual"
+                        && row["choice"] == "automatic"
+                        && !string(row, "consent")?.is_empty()
+                        && row["consent"] == row["revision"]
+                );
+                Ok(summary)
             }
             Action::ReconcileInvoice { .. } | Action::History { .. } => unreachable!(),
             Action::SetupCard {
