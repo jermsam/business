@@ -111,13 +111,61 @@ impl LocalEntityResolver<BusinessParams> for TypeDbUserResolver {
         entity_from_response(&response)
     }
 }
+struct AccountResolver(TypeDbUserResolver);
+#[async_trait::async_trait]
+impl LocalEntityResolver<BusinessParams> for AccountResolver {
+    async fn resolve_entity(
+        &self,
+        username: &str,
+        _ctx: &mut HookContext<Value, BusinessParams>,
+    ) -> Result<Option<Value>> {
+        // Reuse the restricted email grammar; never disclose memberships before password verification.
+        if lookup_query(username, "account").is_err() {
+            return Ok(None);
+        }
+        let query = format!(
+            r#"match $u isa user, has email "{username}", has biz_id $id, has password $password;
+        $t isa company, has biz_id $tenant_id;
+        let $active = biz_account_active($u, $t); $active == true;
+        let $member = biz_member($u, $t, {}); $member == true;
+        fetch {{"id":$id,"tenant_id":$tenant_id,"email":$u.email,"password":$password,"versions":[$u.auth_version]}};"#,
+            now()
+        );
+        account_from_response(&self.0.adapter.read(json!({"query":query})).await?)
+    }
+}
+fn account_from_response(response: &Value) -> Result<Option<Value>> {
+    let rows = response
+        .pointer("/ok/answers")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow::anyhow!("Invalid account response"))?;
+    let mut entities = Vec::new();
+    for row in rows {
+        let entity = entity_from_response(&json!({"ok":{"answers":[row]}}))?.unwrap();
+        if let Some(first) = entities.first() {
+            let first: &Value = first;
+            for key in ["id", "email", "password", "credential_version"] {
+                anyhow::ensure!(first[key] == entity[key], "Ambiguous account identity");
+            }
+        }
+        entities.push(entity);
+    }
+    entities.sort_by(|a, b| a["tenant_id"].as_str().cmp(&b["tenant_id"].as_str()));
+    entities.dedup_by(|a, b| a["tenant_id"] == b["tenant_id"]);
+    Ok(entities.into_iter().next())
+}
 pub fn register_local(
     auth: &mut AuthenticationBuilder<BusinessParams>,
     state: Arc<crate::typedb::TypeDBState>,
 ) {
     let strategy = LocalStrategy::new().with_entity_resolver(Arc::new(TypeDbUserResolver {
-        adapter: TypeDBAdapter::new(state),
+        adapter: TypeDBAdapter::new(state.clone()),
     }));
+    let account =
+        LocalStrategy::new().with_entity_resolver(Arc::new(AccountResolver(TypeDbUserResolver {
+            adapter: TypeDBAdapter::new(state),
+        })));
+    auth.register("account", Arc::new(VersionedLocal(account)));
     auth.register(
         "local",
         Arc::new(VersionedLocal(strategy)) as Arc<dyn AuthenticationStrategy<BusinessParams>>,
@@ -145,6 +193,21 @@ impl AuthenticationStrategy<BusinessParams> for VersionedLocal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn account_lookup_rejects_ambiguous_identity_and_handles_no_memberships() {
+        assert!(account_from_response(&json!({"ok":{"answers":[]}}))
+            .unwrap()
+            .is_none());
+        let row = json!({"data":{"id":"00000000-0000-4000-8000-000000000001","tenant_id":"00000000-0000-4000-8000-000000000002","email":"a@b.com","password":"hash"}});
+        let mut other = row.clone();
+        other["data"]["id"] = json!("00000000-0000-4000-8000-000000000003");
+        assert!(account_from_response(&json!({"ok":{"answers":[row.clone(),other]}})).is_err());
+        assert!(
+            account_from_response(&json!({"ok":{"answers":[row.clone(),row]}}))
+                .unwrap()
+                .is_some()
+        );
+    }
     #[test]
     fn lookup_rejects_injection_and_requires_tenant_membership() {
         assert!(lookup_query("x@example.com\"; delete $u;", "example.com").is_err());

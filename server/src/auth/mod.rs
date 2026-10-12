@@ -12,7 +12,11 @@ pub fn strategies(
     builder: &mut DogAppBuilder<Value, BusinessParams>,
 ) -> Result<Arc<dog_auth::AuthServiceAdapter<BusinessParams>>> {
     let mut opts = AuthOptions {
-        strategies: vec![AuthStrategy::Jwt, AuthStrategy::Custom("local".into())],
+        strategies: vec![
+            AuthStrategy::Jwt,
+            AuthStrategy::Custom("local".into()),
+            AuthStrategy::Custom("account".into()),
+        ],
         ..Default::default()
     };
     opts.jwt.secret = builder.get("auth.jwt.secret");

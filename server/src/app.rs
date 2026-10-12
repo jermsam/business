@@ -589,6 +589,7 @@ mod live_tests {
     }
     include!("workspace_tests.rs");
     include!("identity_tests.rs");
+    include!("account_login_tests.rs");
     include!("transaction_tests.rs");
     include!("recovery_tests.rs");
     include!("soak_tests.rs");

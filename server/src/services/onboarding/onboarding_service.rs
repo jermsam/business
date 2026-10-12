@@ -39,7 +39,10 @@ impl DogService<Value, BusinessParams> for OnboardingService {
         let merchant =
             crate::services::billing::billing_schema::id(&std::env::var("BILLING_MERCHANT_ID")?)?;
         let live = std::env::var("BILLING_LIVE").as_deref() == Ok("true");
-        self.access.query(format!(r#"{scope} let $owner=biz_owner($u,$t,$now);fetch {{"email":$u.email,"tenant_id":$t.biz_id,"owner":$owner,"merchant_id":"{merchant}","live":{live}}};"#),false).await
+        self.access.query(format!(r#"{scope} let $owner=biz_owner($u,$t,$now);fetch {{"email":$u.email,"tenant_id":$t.biz_id,"owner":$owner,"merchant_id":"{merchant}","live":{live},"companies":[match $company isa company, has biz_id $company_id;
+            let $active=biz_account_active($u,$company); $active==true;
+            let $member=biz_member($u,$company,$now); $member==true;
+            fetch {{"id":$company_id,"domain":$company.company_domain,"names":[match (buyer:$company,customer:$customer) isa bill_account; fetch {{"name":$customer.name}};]}};]}};"#),false).await
     }
     async fn create(
         &self,
