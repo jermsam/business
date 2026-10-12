@@ -1,0 +1,3 @@
+define
+attribute bill_removed_method, value string;
+bill_customer owns bill_removed_method @card(0..);

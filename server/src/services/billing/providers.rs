@@ -164,7 +164,7 @@ impl Providers {
         if save_only {
             for (key, value) in &mut form {
                 if key == "custom_text[submit][message]" {
-                    *value = "Save your card securely for future use. No payment is taken. Automatic payments stay off until you separately review and authorize your schedules.".into();
+                    *value = "Save this card securely for future use. No payment is taken. Adding a card does not change your existing payment settings.".into();
                 }
             }
         }
@@ -181,7 +181,7 @@ impl Providers {
             for (key, value) in &mut form {
                 if key == "custom_text[submit][message]" {
                     *value = if save_only {
-                        "Save your bank account for future payments. Nothing is charged now. Automatic invoice payments remain off until you review and authorize your schedules."
+                        "Save this bank account for future payments. Nothing is charged now. Adding an account does not change your existing payment settings."
                     } else {
                         "You authorize automatic payment of the billing schedules you reviewed using this bank account. You can disable automatic payments in your billing page."
                     }.into();

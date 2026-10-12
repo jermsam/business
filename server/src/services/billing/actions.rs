@@ -33,6 +33,19 @@ impl Actions {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Action {
+    PaymentMethods {
+        customer_id: String,
+    },
+    SetDefault {
+        customer_id: String,
+        method_id: String,
+        expected_revision: String,
+    },
+    RemoveMethod {
+        customer_id: String,
+        method_id: String,
+        expected_revision: String,
+    },
     AuthorizeSaved {
         customer_id: String,
         expected_revision: String,
@@ -136,7 +149,10 @@ impl DogService<Value, BusinessParams> for Actions {
             Action::SetupCard { customer_id, .. }
             | Action::ConfirmCard { customer_id, .. }
             | Action::PaymentMethod { customer_id }
-            | Action::AuthorizeSaved { customer_id, .. } => schema::id(customer_id)?,
+            | Action::AuthorizeSaved { customer_id, .. }
+            | Action::PaymentMethods { customer_id }
+            | Action::SetDefault { customer_id, .. }
+            | Action::RemoveMethod { customer_id, .. } => schema::id(customer_id)?,
             Action::ReconcileInvoice { .. } | Action::History { .. } => unreachable!(),
         };
         let permitted = format!(
@@ -159,6 +175,164 @@ impl DogService<Value, BusinessParams> for Actions {
         let actor = string(row, "actor")?;
         let revision = string(row, "revision")?;
         match action {
+            Action::PaymentMethods { .. } => {
+                let customer = string(row, "stripe_id")?;
+                if customer.is_empty() {
+                    return Ok(json!({"methods":[]}));
+                }
+                providers::safe_id(customer)?;
+                let removed=self.access.query(format!(r#"{permitted} $c has bill_removed_method $removed; fetch {{"id":$removed}};"#),false).await?;
+                let mut methods = Vec::new();
+                let mut after = String::new();
+                for _ in 0..100 {
+                    let mut params = providers::pairs(&[("limit", "100")]);
+                    if !after.is_empty() {
+                        params.push(("starting_after".into(), after.clone()));
+                    }
+                    let list = engine
+                        .providers
+                        .stripe(
+                            Method::GET,
+                            &format!("/customers/{customer}/payment_methods"),
+                            "",
+                            &params,
+                        )
+                        .await?;
+                    let items = list["data"]
+                        .as_array()
+                        .ok_or_else(|| anyhow::anyhow!("Invalid payment method list"))?;
+                    for method in items {
+                        if !matches!(method["type"].as_str(), Some("card" | "us_bank_account")) {
+                            continue;
+                        }
+                        let mut summary = payment_method_summary(method, customer)?;
+                        summary["id"] = method["id"].clone();
+                        summary["removal_pending"] =
+                            json!(removed.iter().any(|r| r["id"] == method["id"]));
+                        summary["is_default"] = json!(method["id"] == row["payment_method"]);
+                        summary["automatic_enabled"] = json!(
+                            method["id"] == row["payment_method"]
+                                && row["choice"] == "automatic"
+                                && row["policy"] != "manual"
+                                && !string(row, "consent")?.is_empty()
+                                && row["consent"] == row["revision"]
+                        );
+                        methods.push(summary);
+                    }
+                    if list["has_more"] != true {
+                        return Ok(json!({"methods":methods}));
+                    }
+                    after = providers::field(
+                        items
+                            .last()
+                            .ok_or_else(|| anyhow::anyhow!("Invalid pagination"))?,
+                        "id",
+                    )?
+                    .to_owned();
+                }
+                anyhow::bail!("Too many payment methods; contact support")
+            }
+            Action::SetDefault {
+                method_id,
+                expected_revision,
+                ..
+            } => {
+                ensure!(
+                    expected_revision == revision,
+                    "Billing changed; refresh and try again"
+                );
+                providers::safe_id(&method_id)?;
+                let method = engine
+                    .providers
+                    .stripe(
+                        Method::GET,
+                        &format!("/payment_methods/{method_id}"),
+                        "",
+                        &[],
+                    )
+                    .await?;
+                payment_method_summary(&method, string(row, "stripe_id")?)?;
+                if row["payment_method"] == method_id {
+                    return Ok(json!({"changed":false}));
+                }
+                let next = uuid::Uuid::new_v4().to_string();
+                let q = format!(
+                    r#"{permitted} $c has bill_revision {}; not {{ $c has bill_removed_method {}; }};
+                    (merchant:$merchant,customer:$c) isa bill_account;select $t,$u,$c,$merchant;distinct;
+                    update $merchant has biz_revision "{next}";
+                    update $c has bill_revision "{next}",has bill_payment_method {},has bill_choice "manual",has bill_consent ""; {CUSTOMER}"#,
+                    schema::quoted(revision),
+                    schema::quoted(&method_id),
+                    schema::quoted(&method_id)
+                );
+                let mut rows = self.access.query(q, true).await?;
+                ensure!(
+                    rows.len() == 1,
+                    "Billing changed or method removed; refresh and try again"
+                );
+                Ok(rows.remove(0))
+            }
+            Action::RemoveMethod {
+                method_id,
+                expected_revision,
+                ..
+            } => {
+                ensure!(
+                    expected_revision == revision,
+                    "Billing changed; refresh and try again"
+                );
+                providers::safe_id(&method_id)?;
+                let removed=self.access.query(format!(r#"{permitted} $c has bill_removed_method {}; fetch {{"id":$c.bill_key}};"#,schema::quoted(&method_id)),false).await?;
+                let method = engine
+                    .providers
+                    .stripe(
+                        Method::GET,
+                        &format!("/payment_methods/{method_id}"),
+                        "",
+                        &[],
+                    )
+                    .await?;
+                if removed.is_empty() {
+                    payment_method_summary(&method, string(row, "stripe_id")?)?;
+                    let next = uuid::Uuid::new_v4().to_string();
+                    let clear = if row["payment_method"] == method_id {
+                        format!(
+                            r#"update $c has bill_revision "{next}",has bill_payment_method "",has bill_choice "manual",has bill_consent "";"#
+                        )
+                    } else {
+                        String::new()
+                    };
+                    // Retire in TypeDB before detaching. This prevents a racing default change
+                    // from selecting a method whose provider removal is in flight or uncertain.
+                    let q = format!(
+                        r#"{permitted} $c has bill_revision {}; (merchant:$merchant,customer:$c) isa bill_account;
+                        select $t,$u,$c,$merchant;distinct;update $merchant has biz_revision "{next}";
+                        {clear} insert $c has bill_removed_method {}; {CUSTOMER}"#,
+                        schema::quoted(revision),
+                        schema::quoted(&method_id)
+                    );
+                    ensure!(
+                        self.access.query(q, true).await?.len() == 1,
+                        "Billing changed; refresh and try again"
+                    );
+                }
+                if !method["customer"].is_null() {
+                    ensure!(
+                        method["customer"] == row["stripe_id"],
+                        "Payment method customer mismatch"
+                    );
+                    engine
+                        .providers
+                        .stripe(
+                            Method::POST,
+                            &format!("/payment_methods/{method_id}/detach"),
+                            &format!("remove-{customer_id}-{method_id}"),
+                            &[],
+                        )
+                        .await?;
+                }
+                Ok(json!({"removed":true}))
+            }
             Action::AuthorizeSaved {
                 expected_revision, ..
             } => {
@@ -353,21 +527,37 @@ impl DogService<Value, BusinessParams> for Actions {
                     );
                 }
                 if intent["metadata"]["business_purpose"] == "save_only" {
-                    // Saving a card is never schedule consent. Invalidate older approvals,
-                    // and rotate the revision so replay cannot undo a later authorization.
+                    // Stripe keeps every attached method. The first saved method becomes
+                    // default; adding another never alters the current method or its consent.
                     let next_revision = uuid::Uuid::new_v4().to_string();
+                    let first = string(row, "payment_method")?.is_empty();
+                    let change = if first {
+                        format!(
+                            r#"update $c has bill_revision "{next_revision}",has bill_choice "manual",has bill_consent "",has bill_payment_method {};"#,
+                            schema::quoted(card)
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let now = chrono::Utc::now().timestamp();
                     let query = format!(
-                        r#"{permitted} $c has bill_revision {};
-                      (merchant:$merchant,customer:$c) isa bill_account;
-                      select $t,$merchant,$u,$c;distinct;
-                      update $merchant has biz_revision "{next_revision}";
-                      update $c has bill_revision "{next_revision}",has bill_choice "manual",has bill_consent "",has bill_payment_method {};
-                      {CUSTOMER}"#,
+                        r#"{permitted} $c has bill_revision {}; not {{ $c has bill_removed_method {}; }};
+                        not {{ $e isa bill_consent_evidence,has bill_key {}; }};
+                        (merchant:$merchant,customer:$c) isa bill_account; select $t,$merchant,$u,$c;distinct;
+                        update $merchant has biz_revision "{next_revision}"; {change}
+                        insert $e isa bill_consent_evidence,has bill_key {},has bill_revision {},has bill_updated {now};
+                        (customer:$c,actor:$u,evidence:$e) isa bill_consent_owner; {CUSTOMER}"#,
                         schema::quoted(revision),
-                        schema::quoted(card)
+                        schema::quoted(card),
+                        schema::quoted(intent_id),
+                        schema::quoted(intent_id),
+                        schema::quoted(revision)
                     );
                     let mut rows = self.access.query(query, true).await?;
-                    ensure!(rows.len() == 1, "Billing changed or card was already saved");
+                    ensure!(
+                        rows.len() == 1,
+                        "Billing changed or method already saved; refresh"
+                    );
                     let mut saved = rows.remove(0);
                     saved["setup_purpose"] = json!("save_only");
                     return Ok(saved);
@@ -381,11 +571,12 @@ impl DogService<Value, BusinessParams> for Actions {
                 // The SetupIntent is retained in evidence for auditing, never PAN or CVC.
                 let now = chrono::Utc::now().timestamp();
                 let query = format!(
-                    r#"{permitted} $c has bill_revision {},has bill_policy $policy;$policy!="manual";
+                    r#"{permitted} $c has bill_revision {},has bill_policy $policy;$policy!="manual"; not {{$c has bill_removed_method {};}};
      not {{$e isa bill_consent_evidence,has bill_key {};}};
      (merchant:$merchant,customer:$c) isa bill_account;select $t,$merchant,$u,$c;distinct;update $merchant has biz_revision "{intent_id}";update $c has bill_choice "automatic",has bill_consent {},has bill_payment_method {};
      insert $e isa bill_consent_evidence,has bill_key {},has bill_revision {},has bill_updated {now};(customer:$c,actor:$u,evidence:$e) isa bill_consent_owner;{CUSTOMER}"#,
                     schema::quoted(revision),
+                    schema::quoted(card),
                     schema::quoted(intent_id),
                     schema::quoted(revision),
                     schema::quoted(card),

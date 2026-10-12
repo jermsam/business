@@ -55,6 +55,7 @@ async fn main() -> Result<()> {
                 include_str!("../../migrations/005-billing.tql"),
                 include_str!("../../migrations/006-customer-onboarding.tql"),
                 include_str!("../../migrations/007-recovery-and-history.tql"),
+                include_str!("../../migrations/008-payment-methods.tql"),
             ],
             false,
         )
@@ -111,6 +112,7 @@ async fn main() -> Result<()> {
             include_str!("../../migrations/005-billing.tql"),
             include_str!("../../migrations/006-customer-onboarding.tql"),
             include_str!("../../migrations/007-recovery-and-history.tql"),
+            include_str!("../../migrations/008-payment-methods.tql"),
         ],
         false,
     )
