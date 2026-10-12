@@ -45,6 +45,8 @@ enum Action {
         expected_revision: String,
         #[serde(default)]
         save_only: bool,
+        #[serde(default)]
+        bank_account: bool,
     },
     ConfirmCard {
         customer_id: String,
@@ -153,6 +155,7 @@ impl DogService<Value, BusinessParams> for Actions {
             Action::SetupCard {
                 expected_revision,
                 save_only,
+                bank_account,
                 ..
             } => {
                 ensure!(
@@ -168,7 +171,18 @@ impl DogService<Value, BusinessParams> for Actions {
                     .await?;
                 let result = engine
                     .providers
-                    .setup_mode(&customer, &customer_id, revision, actor, save_only)
+                    .setup_method(
+                        &customer,
+                        &customer_id,
+                        revision,
+                        actor,
+                        save_only,
+                        if bank_account {
+                            "us_bank_account"
+                        } else {
+                            "card"
+                        },
+                    )
                     .await?;
                 let url = providers::field(&result, "url")?;
                 providers::trusted_url(url, "checkout.stripe.com")?;
@@ -214,9 +228,26 @@ impl DogService<Value, BusinessParams> for Actions {
                     .stripe(Method::GET, &format!("/payment_methods/{card}"), "", &[])
                     .await?;
                 ensure!(
-                    method["type"] == "card" && method["customer"] == row["stripe_id"],
+                    matches!(method["type"].as_str(), Some("card" | "us_bank_account"))
+                        && method["customer"] == row["stripe_id"],
                     "Card does not belong to customer"
                 );
+                if method["type"] == "us_bank_account" {
+                    let mandate_id = providers::field(&intent, "mandate")?;
+                    providers::safe_id(mandate_id)?;
+                    let mandate = engine
+                        .providers
+                        .stripe(Method::GET, &format!("/mandates/{mandate_id}"), "", &[])
+                        .await?;
+                    ensure!(
+                        mandate["status"] == "active" && mandate["payment_method"] == card,
+                        "Bank authorization is not active"
+                    );
+                    ensure!(
+                        method["us_bank_account"]["status_details"]["blocked"].is_null(),
+                        "Bank account is blocked"
+                    );
+                }
                 if intent["metadata"]["business_purpose"] == "save_only" {
                     // Saving a card is never schedule consent. Invalidate older approvals,
                     // and rotate the revision so replay cannot undo a later authorization.

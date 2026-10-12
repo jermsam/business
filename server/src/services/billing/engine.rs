@@ -299,16 +299,15 @@ impl Engine {
         let consent = string(row, "revision")?;
         let attempted = format!("attempted:{consent}");
         self.write(format!(r#"{} $i has bill_status "open",has bill_revision {}; $c has bill_revision {},has bill_consent {};select $t,$i;distinct;update $i has bill_revision {},has bill_updated {now};fetch {{"id":$i.bill_key}};"#,self.invoice_match(id)?,schema::quoted(consent),schema::quoted(consent),schema::quoted(consent),schema::quoted(&attempted))).await?;
-        let result = self
+        let _result = self
             .providers
             .charge(string(row, "external")?, id, string(row, "payment_method")?)
             .await;
         // Even HTTP 402 can contain an already-created PaymentIntent: fresh GET is
         // authoritative and only the first caller can obtain the claim above.
-        match result {
-            Ok(value) => self.apply_observation(id, Provider::Stripe, &value).await,
-            Err(_) => self.reconcile(id).await,
-        }
+        // Invoice status stays open while ACH is processing. Re-read its payment
+        // intents before notifying the customer or exposing a pay-again action.
+        self.reconcile(id).await
     }
     // Rotate attempted work even when a provider errors or the tick is cancelled.
     // Otherwise a permanently failing first batch can starve every later invoice.

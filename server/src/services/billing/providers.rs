@@ -145,6 +145,22 @@ impl Providers {
         actor: &str,
         save_only: bool,
     ) -> Result<Value> {
+        self.setup_method(customer, id, revision, actor, save_only, "card")
+            .await
+    }
+    pub async fn setup_method(
+        &self,
+        customer: &str,
+        id: &str,
+        revision: &str,
+        actor: &str,
+        save_only: bool,
+        method: &str,
+    ) -> Result<Value> {
+        ensure!(
+            matches!(method, "card" | "us_bank_account"),
+            "Unsupported payment method"
+        );
         let base = std::env::var("BILLING_PUBLIC_URL")?;
         let parsed = reqwest::Url::parse(&base)?;
         ensure!(
@@ -169,6 +185,26 @@ impl Providers {
             for (key, value) in &mut form {
                 if key == "custom_text[submit][message]" {
                     *value = "Save your card securely for future use. No payment is taken. Automatic payments stay off until you separately review and authorize your schedules.".into();
+                }
+            }
+        }
+        if method == "us_bank_account" {
+            form.retain(|(key, _)| {
+                key != "payment_method_types[0]" && !key.starts_with("consent_collection[")
+            });
+            form.extend(pairs(&[
+                ("payment_method_types[0]", "us_bank_account"),
+                ("currency", "usd"),
+                ("payment_method_options[us_bank_account][verification_method]", "instant"),
+                ("payment_method_options[us_bank_account][financial_connections][permissions][0]", "payment_method"),
+            ]));
+            for (key, value) in &mut form {
+                if key == "custom_text[submit][message]" {
+                    *value = if save_only {
+                        "Save your bank account for future payments. Nothing is charged now. Automatic invoice payments remain off until you review and authorize your schedules."
+                    } else {
+                        "You authorize automatic payment of the billing schedules you reviewed using this bank account. You can disable automatic payments in your billing page."
+                    }.into();
                 }
             }
         }
@@ -298,8 +334,43 @@ impl Providers {
                     .await
             }
             Provider::Stripe => {
-                self.stripe(Method::GET, &format!("/invoices/{id}"), "", &[])
-                    .await
+                let mut invoice = self
+                    .stripe(Method::GET, &format!("/invoices/{id}"), "", &[])
+                    .await?;
+                if invoice["status"] == "open" {
+                    for payment in self
+                        .list_history("/invoice_payments", "invoice", id)
+                        .await?
+                    {
+                        ensure!(
+                            payment["invoice"] == id && payment["livemode"] == self.live,
+                            "Invoice payment binding mismatch"
+                        );
+                        if payment["status"] == "open"
+                            && payment["payment"]["type"] == "payment_intent"
+                        {
+                            let intent_id = field(&payment["payment"], "payment_intent")?;
+                            safe_id(intent_id)?;
+                            let intent = self
+                                .stripe(
+                                    Method::GET,
+                                    &format!("/payment_intents/{intent_id}"),
+                                    "",
+                                    &[],
+                                )
+                                .await?;
+                            ensure!(
+                                intent["customer"] == invoice["customer"]
+                                    && intent["livemode"] == self.live,
+                                "Payment customer mismatch"
+                            );
+                            if intent["status"] == "processing" {
+                                invoice["business_payment_processing"] = json!(true);
+                            }
+                        }
+                    }
+                }
+                Ok(invoice)
             }
         }
     }
@@ -349,6 +420,7 @@ pub fn status(provider: Provider, value: &Value) -> Result<&'static str> {
         (Provider::Mercury, "Processing") => "processing",
         (Provider::Stripe, "draft") => "scheduled",
         (Provider::Stripe, "uncollectible") => "uncollectible",
+        (Provider::Stripe, "open") if value["business_payment_processing"] == true => "processing",
         (Provider::Mercury, "Unpaid") | (Provider::Stripe, "open") => "open",
         _ => anyhow::bail!("Unrecognized invoice state"),
     })
@@ -382,6 +454,26 @@ mod tests {
     #[test]
     fn unexpected_states_and_paths_fail_closed() {
         assert!(safe_id("../invoices").is_err());
+        assert_eq!(
+            status(
+                Provider::Stripe,
+                &json!({"status":"open","business_payment_processing":true})
+            )
+            .unwrap(),
+            "processing"
+        );
+        assert_eq!(
+            status(Provider::Stripe, &json!({"status":"open"})).unwrap(),
+            "open"
+        );
+        assert_eq!(
+            status(
+                Provider::Stripe,
+                &json!({"status":"paid","business_payment_processing":true})
+            )
+            .unwrap(),
+            "paid"
+        );
         assert!(status(Provider::Mercury, &json!({"status":"SomethingNew"})).is_err());
         assert_eq!(
             status(Provider::Mercury, &json!({"status":"Processing"})).unwrap(),
@@ -508,6 +600,30 @@ mod live_tests {
             .unwrap()
             .contains("No payment is taken"));
         trusted_url(field(&retry, "url").unwrap(), "checkout.stripe.com").unwrap();
+        let bank = providers
+            .setup_method(
+                &customer,
+                &id,
+                "unchanged-terms",
+                "test-actor",
+                true,
+                "us_bank_account",
+            )
+            .await
+            .unwrap();
+        assert_eq!(bank["mode"], "setup");
+        assert_eq!(bank["payment_method_types"], json!(["us_bank_account"]));
+        assert!(bank["payment_intent"].is_null());
+        let bank_id = field(&bank, "id").unwrap();
+        providers
+            .stripe(
+                Method::POST,
+                &format!("/checkout/sessions/{bank_id}/expire"),
+                &format!("expire-{bank_id}"),
+                &[],
+            )
+            .await
+            .unwrap();
     }
     #[tokio::test]
     #[ignore = "Requires explicitly approved local Stripe sandbox key"]

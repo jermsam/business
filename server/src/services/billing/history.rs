@@ -8,7 +8,12 @@ use anyhow::{ensure, Result};
 use reqwest::Method;
 use serde_json::{json, Value};
 impl Providers {
-    async fn list_history(&self, path: &str, filter: &str, id: &str) -> Result<Vec<Value>> {
+    pub(super) async fn list_history(
+        &self,
+        path: &str,
+        filter: &str,
+        id: &str,
+    ) -> Result<Vec<Value>> {
         safe_id(id)?;
         let mut values = Vec::new();
         let mut after = String::new();
