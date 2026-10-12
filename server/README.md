@@ -162,3 +162,14 @@ cargo test --locked --lib hosted_business_soak -- --ignored --nocapture
 The restart pair additionally requires the controlled provider restart described
 above. Preserve failed attempts in the evidence; do not retry mutations or lower
 the acceptance thresholds to turn a failed run into a pass.
+
+Customer invitations are emailed after the invitation transaction commits. Configure
+`BILLING_MAIL_ENABLED=true`, `RESEND_API_KEY`, `BILLING_EMAIL_FROM`, and
+`BILLING_PUBLIC_URL=https://jitpomi.com/account/`. In sandbox mode only addresses in
+`INVITATION_TEST_EMAILS` (comma separated; defaults to `BILLING_TEST_EMAIL`) may
+receive invitation mail. Payment email recipient restrictions are unchanged.
+The API reports `delivery.status=accepted` only after Resend accepts the message;
+this does not certify inbox delivery. `unconfirmed` leaves the created customer and
+link intact, with a copy-link fallback. Do not repeat customer creation after an
+uncertain send; resend from the existing customer instead. Resending explicitly
+invalidates the old unused link. Used invitations require password recovery.

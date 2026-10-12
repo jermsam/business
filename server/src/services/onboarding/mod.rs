@@ -1,3 +1,4 @@
+mod invitation_email;
 mod onboarding_hooks;
 pub(crate) mod onboarding_schema;
 mod onboarding_service;

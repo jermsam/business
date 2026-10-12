@@ -79,8 +79,9 @@ impl DogService<Value, BusinessParams> for OnboardingService {
                     quoted(&email)
                 );
                 self.access.query(q, true).await?;
+                let delivery = super::invitation_email::deliver(&email, &token).await;
                 Ok(
-                    json!({"customer_id":customer,"tenant_id":buyer,"token":token,"expires_at":expires}),
+                    json!({"customer_id":customer,"tenant_id":buyer,"token":token,"expires_at":expires,"delivery":delivery}),
                 )
             }
             action @ (Input::RevokeInvite { .. } | Input::RenewInvite { .. }) => {
@@ -112,7 +113,7 @@ impl DogService<Value, BusinessParams> for OnboardingService {
                     $invite has portal_used false;
                     select $t,$invite,$buyer;distinct;
                     update $invite has portal_token_hash "{hash}",has portal_expires {expires};
-                    fetch {{"tenant_id":$buyer.biz_id}};"#
+                    fetch {{"tenant_id":$buyer.biz_id,"email":$invite.email}};"#
                 );
                 let rows = self.access.query(query, true).await?;
                 ensure!(
@@ -120,7 +121,13 @@ impl DogService<Value, BusinessParams> for OnboardingService {
                     "Invitation unavailable or already accepted"
                 );
                 if renew {
-                    Ok(json!({"token":token,"expires_at":expires,"tenant_id":rows[0]["tenant_id"]}))
+                    let email = rows[0]["email"]
+                        .as_str()
+                        .ok_or_else(|| anyhow::anyhow!("Invitation recipient missing"))?;
+                    let delivery = super::invitation_email::deliver(email, &token).await;
+                    Ok(
+                        json!({"token":token,"expires_at":expires,"tenant_id":rows[0]["tenant_id"],"delivery":delivery}),
+                    )
                 } else {
                     Ok(json!({"revoked":true}))
                 }
