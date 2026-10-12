@@ -135,6 +135,16 @@ impl Providers {
         revision: &str,
         actor: &str,
     ) -> Result<Value> {
+        self.setup_mode(customer, id, revision, actor, false).await
+    }
+    pub async fn setup_mode(
+        &self,
+        customer: &str,
+        id: &str,
+        revision: &str,
+        actor: &str,
+        save_only: bool,
+    ) -> Result<Value> {
         let base = std::env::var("BILLING_PUBLIC_URL")?;
         let parsed = reqwest::Url::parse(&base)?;
         ensure!(
@@ -145,7 +155,23 @@ impl Providers {
                 && parsed.fragment().is_none(),
             "Configure a trusted HTTPS billing return URL"
         );
-        let form=pairs(&[("mode","setup"),("customer",customer),("payment_method_types[0]","card"),("success_url",&format!("{base}?customer={id}&setup={{CHECKOUT_SESSION_ID}}")),("cancel_url",&base),("client_reference_id",id),("setup_intent_data[metadata][business_customer]",id),("setup_intent_data[metadata][business_revision]",revision),("setup_intent_data[metadata][business_actor]",actor),("custom_text[submit][message]","By saving this card, you authorize automatic payment of the billing schedules you reviewed. You can disable automatic payments in your billing page."),("consent_collection[payment_method_reuse_agreement][position]","auto")]);
+        let mut form=pairs(&[("mode","setup"),("customer",customer),("payment_method_types[0]","card"),("success_url",&format!("{base}?customer={id}&setup={{CHECKOUT_SESSION_ID}}")),("cancel_url",&base),("client_reference_id",id),("setup_intent_data[metadata][business_customer]",id),("setup_intent_data[metadata][business_revision]",revision),("setup_intent_data[metadata][business_actor]",actor),("custom_text[submit][message]","By saving this card, you authorize automatic payment of the billing schedules you reviewed. You can disable automatic payments in your billing page."),("consent_collection[payment_method_reuse_agreement][position]","auto")]);
+        form.push((
+            "setup_intent_data[metadata][business_purpose]".into(),
+            if save_only {
+                "save_only"
+            } else {
+                "authorize_schedules"
+            }
+            .into(),
+        ));
+        if save_only {
+            for (key, value) in &mut form {
+                if key == "custom_text[submit][message]" {
+                    *value = "Save your card securely for future use. No payment is taken. Automatic payments stay off until you separately review and authorize your schedules.".into();
+                }
+            }
+        }
         // A new customer interaction needs a fresh setup session, even when the
         // reviewed terms have not changed. Reusing a terms-only idempotency key
         // returns Stripe's cached (possibly expired/completed) session. This is
@@ -443,7 +469,7 @@ mod live_tests {
             .await
             .unwrap();
         let retry = providers
-            .setup(&customer, &id, "unchanged-terms", "test-actor")
+            .setup_mode(&customer, &id, "unchanged-terms", "test-actor", true)
             .await
             .unwrap();
         let retry_id = field(&retry, "id").unwrap();
@@ -473,6 +499,14 @@ mod live_tests {
             "Retry must not reuse an expired Checkout session"
         );
         assert_eq!(observed["status"], "open");
+        assert_eq!(observed["mode"], "setup");
+        assert_eq!(observed["customer"], customer);
+        assert!(observed["subscription"].is_null());
+        assert!(observed["payment_intent"].is_null());
+        assert!(observed["custom_text"]["submit"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("No payment is taken"));
         trusted_url(field(&retry, "url").unwrap(), "checkout.stripe.com").unwrap();
     }
     #[tokio::test]

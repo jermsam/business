@@ -43,6 +43,8 @@ enum Action {
     SetupCard {
         customer_id: String,
         expected_revision: String,
+        #[serde(default)]
+        save_only: bool,
     },
     ConfirmCard {
         customer_id: String,
@@ -149,14 +151,16 @@ impl DogService<Value, BusinessParams> for Actions {
         match action {
             Action::ReconcileInvoice { .. } | Action::History { .. } => unreachable!(),
             Action::SetupCard {
-                expected_revision, ..
+                expected_revision,
+                save_only,
+                ..
             } => {
                 ensure!(
                     expected_revision == revision,
                     "Billing changed; reload and review the schedules before authorizing"
                 );
                 ensure!(
-                    row["policy"] != "manual",
+                    save_only || row["policy"] != "manual",
                     "Seller has disabled automatic payments"
                 );
                 let customer = engine
@@ -164,7 +168,7 @@ impl DogService<Value, BusinessParams> for Actions {
                     .await?;
                 let result = engine
                     .providers
-                    .setup(&customer, &customer_id, revision, actor)
+                    .setup_mode(&customer, &customer_id, revision, actor, save_only)
                     .await?;
                 let url = providers::field(&result, "url")?;
                 providers::trusted_url(url, "checkout.stripe.com")?;
@@ -212,6 +216,31 @@ impl DogService<Value, BusinessParams> for Actions {
                 ensure!(
                     method["type"] == "card" && method["customer"] == row["stripe_id"],
                     "Card does not belong to customer"
+                );
+                if intent["metadata"]["business_purpose"] == "save_only" {
+                    // Saving a card is never schedule consent. Invalidate older approvals,
+                    // and rotate the revision so replay cannot undo a later authorization.
+                    let next_revision = uuid::Uuid::new_v4().to_string();
+                    let query = format!(
+                        r#"{permitted} $c has bill_revision {};
+                      (merchant:$merchant,customer:$c) isa bill_account;
+                      select $t,$merchant,$u,$c;distinct;
+                      update $merchant has biz_revision "{next_revision}";
+                      update $c has bill_revision "{next_revision}",has bill_choice "manual",has bill_consent "",has bill_payment_method {};
+                      {CUSTOMER}"#,
+                        schema::quoted(revision),
+                        schema::quoted(card)
+                    );
+                    let mut rows = self.access.query(query, true).await?;
+                    ensure!(rows.len() == 1, "Billing changed or card was already saved");
+                    let mut saved = rows.remove(0);
+                    saved["setup_purpose"] = json!("save_only");
+                    return Ok(saved);
+                }
+                ensure!(
+                    intent["metadata"]["business_purpose"].is_null()
+                        || intent["metadata"]["business_purpose"] == "authorize_schedules",
+                    "Unknown setup purpose"
                 );
                 // Same customer revision participates in all preference/schedule writes.
                 // The SetupIntent is retained in evidence for auditing, never PAN or CVC.
