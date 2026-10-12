@@ -626,6 +626,60 @@ mod live_tests {
             .unwrap();
     }
     #[tokio::test]
+    #[ignore = "Requires approved Stripe sandbox; verifies pending ACH is not paid"]
+    async fn stripe_sandbox_ach_processing() {
+        dotenvy::from_path(std::env::var("BILLING_TEST_ENV").unwrap()).unwrap();
+        let providers = Providers::new().unwrap();
+        assert!(!providers.live);
+        let id = uuid::Uuid::new_v4().to_string();
+        let customer = providers
+            .customer(
+                Provider::Stripe,
+                &id,
+                "ACH sandbox validation",
+                "ach-test@example.com",
+            )
+            .await
+            .unwrap();
+        let setup = providers
+            .stripe(
+                Method::POST,
+                "/setup_intents",
+                &format!("setup-{id}"),
+                &pairs(&[
+                    ("customer", &customer),
+                    ("payment_method", "pm_usBankAccount_processing"),
+                    ("payment_method_types[0]", "us_bank_account"),
+                    ("usage", "off_session"),
+                    ("confirm", "true"),
+                    ("mandate_data[customer_acceptance][type]", "offline"),
+                ]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(setup["status"], "succeeded");
+        let input = InvoiceRequest {
+            id: id.clone(),
+            customer,
+            provider: Provider::Stripe,
+            mode: Mode::Automatic,
+            amount: 100,
+            description: "ACH sandbox test; no real payment".into(),
+            issued: chrono::Utc::now().timestamp(),
+            due: chrono::Utc::now().timestamp() + 86400,
+        };
+        let draft = providers.invoice(&input).await.unwrap();
+        let external = field(&draft, "id").unwrap();
+        providers.finish_invoice(&input, external).await.unwrap();
+        providers
+            .charge(external, &id, field(&setup, "payment_method").unwrap())
+            .await
+            .unwrap();
+        let observed = providers.observe(Provider::Stripe, external).await.unwrap();
+        assert_eq!(status(Provider::Stripe, &observed).unwrap(), "processing");
+        assert_eq!(observed["amount_paid"], 0);
+    }
+    #[tokio::test]
     #[ignore = "Requires explicitly approved local Stripe sandbox key"]
     async fn stripe_sandbox_invoice_lifecycle() {
         dotenvy::from_path(
