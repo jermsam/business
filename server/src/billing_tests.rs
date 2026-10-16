@@ -47,6 +47,9 @@ async fn hosted_billing_isolation_and_schedule() {
     assert_eq!(s, 200, "Create customer: {customer}");
     let id = customer["id"].as_str().unwrap();
     let path = format!("/billing-customers/{id}");
+    // A populated internal identifier must not leak through either customer projection.
+    adapter.write(json!({"query":format!(r#"match $c isa bill_customer,has bill_key "{id}";update $c has bill_payment_method "pm_synthetic_private";"#)})).await.unwrap();
+    assert!(customer.get("payment_method").is_none());
     for actor in [seller, buyer] {
         let (s, v) = call(
             http.clone(),
@@ -59,7 +62,12 @@ async fn hosted_billing_isolation_and_schedule() {
         .await;
         assert_eq!(s, 200, "{v}");
         assert!(v.get("payment_method").is_none());
+        let (s, rows) = call(http.clone(), &actor.0, "GET", "/billing-customers", Value::Null, Some(&actor.2)).await;
+        assert_eq!(s, 200, "{rows}");
+        let visible = rows.as_array().unwrap().iter().find(|row| row["id"] == id).unwrap();
+        assert!(visible.get("payment_method").is_none());
     }
+    adapter.write(json!({"query":format!(r#"match $c isa bill_customer,has bill_key "{id}";update $c has bill_payment_method "";"#)})).await.unwrap();
     let (s, _) = call(
         http.clone(),
         &stranger.0,
