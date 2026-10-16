@@ -1,8 +1,15 @@
 # Shared payments: incremental extraction
 
-Status: sandbox endpoints and owner-only browser panel prepared for hosted testing. Not approved for live checkout. SEYFR is disconnected.
+Status: sandbox endpoints and owner-only browser panel deployed and verified through hosted Stripe checkout, reconciliation and signed event delivery. Not approved for live checkout. SEYFR is disconnected.
 
 ## Hosted browser testing (2026-10-16)
+
+Hosted acceptance passed: the portal created Stripe test session
+`cs_test_a1a4N3iervz0mS51T7k2BnMsd8KFdGdXUuv0dxTKttJQq5Q5XgR0652XH0`,
+a synthetic $1 card payment completed in Stripe's sandbox, explicit reconciliation
+reported paid, and the configured HTTPS demonstration receiver acknowledged the
+signed paid event as delivered. Backend commit `cc47193`; portal commit `cb4b982`
+with a subsequent same-tab checkout return fix. No real funds or fulfilment.
 
 Browser entry point: `https://jitpomi.com/account/payments/`. Sign in through
 `/account/` and select the existing merchant company first. The panel uses the
