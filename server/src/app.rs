@@ -37,6 +37,17 @@ pub async fn build() -> Result<(
 }
 
 dog_transport::declare_adapter!(axum, endpoint, crate::BusinessParams);
+/// Explicit sandbox opt-in. No route is exposed in the default deployment.
+pub fn payment_router(app: &DogApp<Value, BusinessParams>) -> Result<axum::Router> {
+    if std::env::var("PAYMENTS_SANDBOX_ENABLED").as_deref() != Ok("true") {
+        return Ok(axum::Router::new());
+    }
+    let state = app
+        .get::<std::sync::Arc<crate::typedb::TypeDBState>>("typedb")
+        .ok_or_else(|| anyhow::anyhow!("Missing TypeDB state"))?;
+    let applications = serde_json::from_str(&std::env::var("PAYMENTS_APPLICATIONS_JSON")?)?;
+    crate::services::payments::http::router(state, applications)
+}
 /// The only public HTTP routes. Do not add a fallback exposing arbitrary services.
 pub fn router(http: DogHttpService<Value, BusinessParams>) -> axum::Router {
     axum::Router::new()
@@ -44,6 +55,7 @@ pub fn router(http: DogHttpService<Value, BusinessParams>) -> axum::Router {
         .route_service("/onboarding", endpoint(http.clone()))
         .route_service("/recovery", endpoint(http.clone()))
         .route_service("/billing-actions", endpoint(http.clone()))
+        .route_service("/payments-sandbox-actions", endpoint(http.clone()))
         .route_service("/billing-customers", endpoint(http.clone()))
         .route_service("/billing-customers/{id}", endpoint(http.clone()))
         .route_service("/billing-plans", endpoint(http.clone()))

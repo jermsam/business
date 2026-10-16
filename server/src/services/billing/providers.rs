@@ -28,43 +28,8 @@ impl Providers {
         key: &str,
         form: &[(String, String)],
     ) -> Result<Value> {
-        ensure!(
-            path.starts_with('/') && !path.contains(['?', '#', '\r', '\n']),
-            "Invalid provider path"
-        );
-        let token = std::env::var("STRIPE_SECRET_KEY")?;
-        ensure!(
-            if self.live {
-                token.starts_with("sk_live_") || token.starts_with("rk_live_")
-            } else {
-                token.starts_with("sk_test_") || token.starts_with("rk_test_")
-            },
-            "Stripe key does not match billing mode"
-        );
-        let mut url = reqwest::Url::parse(&format!("https://api.stripe.com/v1{path}"))?;
-        if method == Method::GET && !form.is_empty() {
-            url.query_pairs_mut()
-                .extend_pairs(form.iter().map(|(k, v)| (k.as_str(), v.as_str())));
-        }
-        let mut request = self
-            .http
-            .request(method.clone(), url)
-            .bearer_auth(token)
-            .header("Stripe-Version", "2026-03-25.dahlia");
-        if method != Method::GET {
-            request = request.header("Idempotency-Key", key).form(form);
-        }
-        let response = request.send().await?;
-        ensure!(
-            response.status().is_success(),
-            "Stripe request failed with HTTP {}; reconcile before retrying",
-            response.status()
-        );
-        let result: Value = response.json().await?;
-        if let Some(mode) = result["livemode"].as_bool() {
-            ensure!(mode == self.live, "Provider mode mismatch");
-        }
-        Ok(result)
+        crate::services::payments::stripe::StripeTransport::new(self.http.clone(), self.live)
+            .request(method, path, key, form).await
     }
     pub async fn mercury(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
         ensure!(

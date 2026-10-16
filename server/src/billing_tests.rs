@@ -1,5 +1,27 @@
 // Exercise the public routes and real TypeDB policy functions without provider writes.
 #[tokio::test]
+#[ignore = "Requires development payment grant and protected synthetic billing fixture; no provider writes"]
+async fn hosted_payment_browser_owner_access() {
+    dotenvy::from_path(std::env::var("BILLING_TEST_ENV").unwrap()).unwrap();
+    dotenvy::from_path(std::env::var("PAYMENTS_CONFIG_FILE").unwrap()).unwrap();
+    let (app, http) = build().await.unwrap();
+    let state = app.get::<std::sync::Arc<crate::typedb::TypeDBState>>("typedb").unwrap();
+    assert_eq!(state.database, "business_dev");
+    let fixture: Value = serde_json::from_slice(&std::fs::read(std::env::var("BILLING_UI_FIXTURE_FILE").unwrap()).unwrap()).unwrap();
+    let (s, _) = call(http.clone(), "account", "POST", "/payments-sandbox-actions", json!({"action":"info"}), None).await;
+    assert_eq!(s, 401);
+    for role in ["seller", "buyer"] {
+        let domain = fixture[format!("{role}_domain")].as_str().unwrap();
+        let (s, login) = call(http.clone(), domain, "POST", "/authentication", json!({"strategy":"local","email":fixture[format!("{role}_email")],"password":"billing-test-only"}), None).await;
+        assert_eq!(s, 200);
+        let token = login["accessToken"].as_str().unwrap();
+        let (s, result) = call(http.clone(), domain, "POST", "/payments-sandbox-actions", json!({"action":"info"}), Some(token)).await;
+        assert_eq!(s, if role == "seller" {200} else {403}, "{result}");
+        if role == "seller" { assert_eq!(result["sandbox"], true); }
+    }
+}
+
+#[tokio::test]
 #[ignore = "Requires business_dev with migrate-billing applied"]
 async fn hosted_billing_isolation_and_schedule() {
     use crate::services::billing::{engine::Engine, providers::Providers};

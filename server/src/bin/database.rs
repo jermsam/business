@@ -35,18 +35,55 @@ async fn main() -> Result<()> {
         println!("Created non-admin runtime user");
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("provision-payment-sandbox") {
+        anyhow::ensure!(std::env::var("TYPEDB_DB")? == "business_dev", "Development only");
+        let config = std::env::var("PAYMENTS_CONFIG_FILE")?;
+        dotenvy::from_path(config)?;
+        #[derive(serde::Deserialize)]
+        struct SandboxApp { id: String, merchant: String, product: String }
+        let apps: Vec<SandboxApp> = serde_json::from_str(&std::env::var("PAYMENTS_APPLICATIONS_JSON")?)?;
+        anyhow::ensure!(apps.len() == 1, "One explicit sandbox app required");
+        let app = &apps[0];
+        let q = |s: &str| serde_json::to_string(s).unwrap();
+        let tx = driver.transaction("business_dev", typedb_driver::TransactionType::Write).await?;
+        let merchant=q(&app.merchant); let application=q(&app.id); let product=q(&app.product);
+        let rows=server::access::documents(&tx,&format!(r#"match $t isa company,has biz_id {merchant}; not {{$a isa pay_application,has pay_id {application};}};
+          update $t has biz_revision "{}";
+          insert $a isa pay_application,has pay_id {application};
+          $g isa pay_grant,links (merchant:$t,application:$a),has pay_id "browser-sandbox-grant",has pay_product {product},has pay_environment "sandbox",has pay_active true,has pay_revision "initial";
+          fetch {{"id":$g.pay_id}};"#,uuid::Uuid::new_v4())).await?;
+        anyhow::ensure!(rows.len()==1,"Sandbox app already exists or merchant is missing; inspect rather than overwriting grants");
+        tx.commit().await?;
+        println!("Provisioned sandbox-only application grant for existing merchant");
+        return Ok(());
+    }
     anyhow::ensure!(
         matches!(
             std::env::args().nth(1).as_deref(),
-            Some("create" | "schema" | "migrate-records" | "migrate-access" | "migrate-billing")
+            Some("create" | "schema" | "migrate-records" | "migrate-access" | "migrate-billing" | "migrate-payments")
         ),
-        "Use list, create, schema, migrate-records, migrate-access, or create-user"
+        "Use list, create, schema, migrate-records, migrate-access, migrate-billing, migrate-payments, or create-user"
     );
     let db = std::env::var("TYPEDB_DB")?;
     anyhow::ensure!(
         matches!(db.as_str(), "business_dev" | "business_prod"),
         "Only dedicated Business databases may be provisioned"
     );
+    if std::env::args().nth(1).as_deref() == Some("migrate-payments") {
+        anyhow::ensure!(
+            db == "business_dev",
+            "Payment platform migration is development-only until production approval"
+        );
+        apply_schema_sources(
+            &driver,
+            &db,
+            &[include_str!("../../migrations/009-payment-platform.tql")],
+            false,
+        )
+        .await?;
+        println!("Applied payment platform schema to development database");
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("migrate-billing") {
         apply_schema_sources(
             &driver,
