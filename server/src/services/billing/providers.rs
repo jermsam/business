@@ -29,7 +29,8 @@ impl Providers {
         form: &[(String, String)],
     ) -> Result<Value> {
         crate::services::payments::stripe::StripeTransport::new(self.http.clone(), self.live)
-            .request(method, path, key, form).await
+            .request(method, path, key, form)
+            .await
     }
     pub async fn mercury(&self, method: Method, path: &str, body: Option<Value>) -> Result<Value> {
         ensure!(

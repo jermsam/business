@@ -8,8 +8,8 @@ pub use types::*;
 mod apps;
 mod authentication;
 pub mod billing;
-pub mod payments;
 mod memberships;
+pub mod payments;
 mod policy_state;
 mod records;
 mod workspace;
@@ -23,7 +23,13 @@ pub fn configure(
     if std::env::var("PAYMENTS_SANDBOX_ENABLED").as_deref() == Ok("true")
         && std::env::var("PAYMENTS_BROWSER_APP").is_ok()
     {
-        builder.register_service("payments-sandbox-actions", Arc::new(payments::browser::Browser::new(state.clone(), auth.clone())?));
+        builder.register_service(
+            "payments-sandbox-actions",
+            Arc::new(payments::browser::Browser::new(
+                state.clone(),
+                auth.clone(),
+            )?),
+        );
     }
     builder.register_service(
         "recovery",

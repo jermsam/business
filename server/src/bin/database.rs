@@ -36,17 +36,29 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     if std::env::args().nth(1).as_deref() == Some("provision-payment-sandbox") {
-        anyhow::ensure!(std::env::var("TYPEDB_DB")? == "business_dev", "Development only");
+        anyhow::ensure!(
+            std::env::var("TYPEDB_DB")? == "business_dev",
+            "Development only"
+        );
         let config = std::env::var("PAYMENTS_CONFIG_FILE")?;
         dotenvy::from_path(config)?;
         #[derive(serde::Deserialize)]
-        struct SandboxApp { id: String, merchant: String, product: String }
-        let apps: Vec<SandboxApp> = serde_json::from_str(&std::env::var("PAYMENTS_APPLICATIONS_JSON")?)?;
+        struct SandboxApp {
+            id: String,
+            merchant: String,
+            product: String,
+        }
+        let apps: Vec<SandboxApp> =
+            serde_json::from_str(&std::env::var("PAYMENTS_APPLICATIONS_JSON")?)?;
         anyhow::ensure!(apps.len() == 1, "One explicit sandbox app required");
         let app = &apps[0];
         let q = |s: &str| serde_json::to_string(s).unwrap();
-        let tx = driver.transaction("business_dev", typedb_driver::TransactionType::Write).await?;
-        let merchant=q(&app.merchant); let application=q(&app.id); let product=q(&app.product);
+        let tx = driver
+            .transaction("business_dev", typedb_driver::TransactionType::Write)
+            .await?;
+        let merchant = q(&app.merchant);
+        let application = q(&app.id);
+        let product = q(&app.product);
         let rows=server::access::documents(&tx,&format!(r#"match $t isa company,has biz_id {merchant}; not {{$a isa pay_application,has pay_id {application};}};
           update $t has biz_revision "{}";
           insert $a isa pay_application,has pay_id {application};
