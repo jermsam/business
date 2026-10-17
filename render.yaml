@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: jitpomi-business-validation
+    runtime: rust
+    plan: free
+    rootDir: server
+    buildCommand: cargo build --locked --release --bin server
+    startCommand: ./target/release/server
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: BUSINESS_ACTIVE_REQUESTS
+        value: "3"
+      - key: HTTP_HOST
+        value: 0.0.0.0
+      - key: HTTP_PORT
+        value: "10000"
+      - key: ENVIRONMENT
+        value: production
+      - key: TYPEDB_DB
+        value: business_dev
+      - key: TYPEDB_TLS
+        value: "true"
+      - key: TYPEDB_FORCE_RECREATE
+        value: "false"
+      - key: AUTH_JWT_SECRET
+        generateValue: true
+      - key: TYPEDB_ADDR
+        sync: false
+      - key: TYPEDB_USERNAME
+        sync: false
+      - key: TYPEDB_PASSWORD
+        sync: false

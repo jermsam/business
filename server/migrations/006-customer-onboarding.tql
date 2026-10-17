@@ -1,0 +1,10 @@
+define
+attribute portal_token_hash, value string;
+attribute portal_expires, value integer;
+attribute portal_used, value boolean;
+entity portal_invitation,
+ owns portal_token_hash @key, owns portal_expires @card(1), owns portal_used @card(1),
+ owns email @card(1), owns biz_id @key;
+relation portal_invitation_owner, relates invitation @card(1), relates tenant @card(1);
+portal_invitation plays portal_invitation_owner:invitation @card(1);
+company plays portal_invitation_owner:tenant;

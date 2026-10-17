@@ -33,11 +33,17 @@ impl DogService<Value, BusinessParams> for SubjectsService {
         _ctx: &TenantContext,
         method: &str,
         data: Option<Value>,
-        _params: BusinessParams,
+        params: BusinessParams,
     ) -> Result<Value> {
+        if params.provider.is_some() {
+            return Err(
+                DogError::forbidden("Raw database operations are internal only").into_anyhow(),
+            );
+        }
+        let data = data.ok_or_else(|| DogError::bad_request("Missing query data").into_anyhow())?;
         match method {
-            "read" => self.adapter.read(data.unwrap()).await,
-            "write" => self.adapter.write(data.unwrap()).await,
+            "read" => self.adapter.read(data).await,
+            "write" => self.adapter.write(data).await,
             _ => Err(DogError::new(
                 ErrorKind::MethodNotAllowed,
                 format!("Unknown method: {}", method),

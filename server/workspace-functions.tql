@@ -1,0 +1,55 @@
+define
+fun biz_member($u: user, $t: company, $now: datetime) -> boolean:
+ match
+ $u has biz_id $uid; $t has biz_id $tid;
+ let $key = $tid + ":" + $uid;
+ $m isa biz_membership, has biz_id == $key, links (tenant: $t, person: $u), has biz_state "active", has biz_start $start;
+ $start <= $now;
+ { not { $m has biz_end $missing; }; } or { $m has biz_end $end; $now < $end; };
+ return check;
+
+fun biz_entitled($t: company, $p: biz_product, $now: datetime) -> boolean:
+ match
+ $e isa biz_entitlement, links (tenant: $t, product: $p), has biz_state "active", has biz_start $start;
+ $start <= $now;
+ { not { $e has biz_end $missing; }; } or { $e has biz_end $end; $now < $end; };
+ return check;
+
+fun biz_direct_effect($u: user, $t: company, $project: biz_project, $a: string, $effect: string, $now: datetime) -> boolean:
+ match
+ $g isa biz_grant, links (tenant: $t, grantee: $u, project: $project),
+ has action == $a, has effect == $effect, has biz_state "active", has biz_start $start;
+ $start <= $now;
+ { not { $g has biz_end $missing; }; } or { $g has biz_end $end; $now < $end; };
+ return check;
+
+fun biz_team_effect($u: user, $t: company, $project: biz_project, $a: string, $effect: string, $now: datetime) -> boolean:
+ match
+ (tenant: $t, team: $team) isa biz_team_owner;
+ $m isa biz_team_member, links (team: $team, person: $u), has biz_state "active", has biz_start $joined;
+ $joined <= $now;
+ { not { $m has biz_end $missing_member; }; } or { $m has biz_end $left; $now < $left; };
+ $g isa biz_grant, links (tenant: $t, grantee: $team, project: $project),
+ has action == $a, has effect == $effect, has biz_state "active", has biz_start $start;
+ $start <= $now;
+ { not { $g has biz_end $missing; }; } or { $g has biz_end $end; $now < $end; };
+ return check;
+
+fun biz_effect($u: user, $t: company, $project: biz_project, $a: string, $effect: string, $now: datetime) -> boolean:
+ match
+ { let $direct = biz_direct_effect($u, $t, $project, $a, $effect, $now); $direct == true; } or
+ { let $team = biz_team_effect($u, $t, $project, $a, $effect, $now); $team == true; };
+ return check;
+
+fun biz_can_access($u: user, $t: company, $project: biz_project, $a: string, $now: datetime) -> boolean:
+ match
+ (tenant: $t, product: $p, project: $project) isa biz_project_owner;
+ let $member = biz_member($u, $t, $now); $member == true;
+ let $entitled = biz_entitled($t, $p, $now); $entitled == true;
+ let $allow = biz_effect($u, $t, $project, $a, "allow", $now); $allow == true;
+ let $deny = biz_effect($u, $t, $project, $a, "deny", $now); $deny == false;
+ return check;
+
+fun biz_private_member($u: user, $t: company) -> boolean:
+ match (tenant: $t, member: $u) isa tenant_membership;
+ return check;

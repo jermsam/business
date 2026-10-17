@@ -1,0 +1,68 @@
+define
+attribute bill_key, value string;
+attribute bill_policy, value string @values("customer", "manual", "automatic");
+attribute bill_choice, value string @values("manual", "automatic");
+attribute bill_provider, value string @values("mercury", "stripe");
+attribute bill_status, value string;
+attribute bill_amount, value integer;
+attribute bill_due_days, value integer;
+attribute bill_anchor, value integer;
+attribute bill_next, value integer;
+attribute bill_sequence, value integer;
+attribute bill_interval, value string @values("once", "week", "month", "year");
+attribute bill_stripe_id, value string;
+attribute bill_mercury_id, value string;
+attribute bill_payment_method, value string;
+attribute bill_consent, value string;
+attribute bill_url, value string;
+attribute bill_external_id, value string;
+attribute bill_updated, value integer;
+attribute bill_revision, value string;
+attribute bill_email, value string;
+entity bill_customer,
+ owns bill_key @key, owns name @card(1), owns bill_email @card(1),
+ owns bill_policy @card(1), owns bill_choice @card(1), owns bill_provider @card(1),
+ owns bill_stripe_id @card(1), owns bill_mercury_id @card(1),
+ owns bill_payment_method @card(1), owns bill_consent @card(1), owns bill_revision @card(1);
+relation bill_account, relates merchant @card(1), relates buyer @card(1), relates customer @card(1);
+company plays bill_account:merchant, plays bill_account:buyer;
+bill_customer plays bill_account:customer @card(1);
+entity bill_plan,
+ owns bill_key @key, owns name @card(1), owns bill_amount @card(1), owns bill_due_days @card(1),
+ owns bill_anchor @card(1), owns bill_next @card(1), owns bill_sequence @card(1),
+ owns bill_interval @card(1), owns bill_status @card(1);
+relation bill_plan_owner, relates customer @card(1), relates plan @card(1);
+bill_customer plays bill_plan_owner:customer;
+bill_plan plays bill_plan_owner:plan @card(1);
+entity bill_invoice,
+ owns bill_key @key, owns name @card(1), owns bill_amount @card(1), owns bill_anchor @card(1),
+ owns bill_next @card(1), owns bill_sequence @card(1), owns bill_choice @card(1),
+ owns bill_provider @card(1), owns bill_status @card(1), owns bill_external_id @card(1),
+ owns bill_url @card(1), owns bill_updated @card(1), owns bill_revision @card(1);
+relation bill_invoice_owner, relates plan @card(1), relates invoice @card(1);
+bill_plan plays bill_invoice_owner:plan;
+bill_invoice plays bill_invoice_owner:invoice @card(1);
+entity bill_notice, owns bill_key @key, owns bill_status @card(1), owns bill_updated @card(1);
+relation bill_notice_owner, relates invoice @card(1), relates notice @card(1);
+bill_invoice plays bill_notice_owner:invoice;
+bill_notice plays bill_notice_owner:notice @card(1);
+entity bill_consent_evidence, owns bill_key @key, owns bill_revision @card(1), owns bill_updated @card(1);
+relation bill_consent_owner, relates customer @card(1), relates actor @card(1), relates evidence @card(1);
+bill_customer plays bill_consent_owner:customer;
+user plays bill_consent_owner:actor;
+bill_consent_evidence plays bill_consent_owner:evidence @card(1);
+fun bill_seller($u: user, $t: company, $c: bill_customer, $now: datetime) -> boolean:
+ match
+ (merchant:$t,customer:$c) isa bill_account;
+ let $ok=biz_owner($u,$t,$now); $ok==true;
+ return check;
+fun bill_buyer($u: user, $t: company, $c: bill_customer, $now: datetime) -> boolean:
+ match
+ (buyer:$t,customer:$c) isa bill_account;
+ let $ok=biz_owner($u,$t,$now); $ok==true;
+ return check;
+fun bill_reader($u: user, $t: company, $c: bill_customer, $now: datetime) -> boolean:
+ match
+ { let $ok=bill_seller($u,$t,$c,$now); $ok==true; }
+ or { let $buyer_ok=bill_buyer($u,$t,$c,$now); $buyer_ok==true; };
+ return check;

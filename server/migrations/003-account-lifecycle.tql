@@ -1,0 +1,25 @@
+define
+# Missing state preserves existing accounts; an explicit suspension denies access.
+user owns biz_state;
+company owns biz_state;
+biz_product owns biz_state;
+
+fun biz_account_active($u: user, $t: company) -> boolean:
+ match
+ not { $u has biz_state "suspended"; };
+ not { $t has biz_state "suspended"; };
+ return check;
+
+fun biz_authorized($u: user, $t: company, $project: biz_project, $a: string, $now: datetime) -> boolean:
+ match
+ let $account = biz_account_active($u, $t); $account == true;
+ (tenant: $t, product: $product, project: $project) isa biz_project_owner;
+ not { $product has biz_state "suspended"; };
+ let $access = biz_can_access($u, $t, $project, $a, $now); $access == true;
+ return check;
+
+fun biz_private_authorized($u: user, $t: company, $now: datetime) -> boolean:
+ match
+ let $account = biz_account_active($u, $t); $account == true;
+ let $member = biz_member($u, $t, $now); $member == true;
+ return check;

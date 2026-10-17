@@ -1,0 +1,24 @@
+define
+attribute biz_revision, value string;
+attribute biz_person_id, value string;
+attribute biz_tenant_id, value string;
+attribute biz_role, value string @values("owner", "member");
+company owns biz_revision;
+business_record owns biz_person_id, owns biz_tenant_id;
+biz_membership owns biz_role;
+attribute biz_migrated, value boolean;
+tenant_membership owns biz_migrated;
+
+fun biz_owner($u: user, $t: company, $now: datetime) -> boolean:
+ match
+ let $account = biz_account_active($u, $t); $account == true;
+ let $member = biz_member($u, $t, $now); $member == true;
+ $u has biz_id $uid; $t has biz_id $tid; let $key = $tid + ":" + $uid;
+ $m isa biz_membership, has biz_id == $key, has biz_role "owner", links (tenant: $t, person: $u);
+ return check;
+
+fun biz_other_owner($target: user, $t: company, $now: datetime) -> boolean:
+ match
+ $other isa user; not { $other is $target; };
+ let $owner = biz_owner($other, $t, $now); $owner == true;
+ return check;
