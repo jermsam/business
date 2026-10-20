@@ -1,0 +1,36 @@
+# Synthetic test data only; never loaded by an application entry point.
+insert
+$t isa tenant, has tenant_id "tenant-a", has name "A", has status "active", has revision "initial";
+$other isa tenant, has tenant_id "tenant-b", has name "B", has status "active", has revision "initial";
+$alice isa person, has identity_id "alice", has name "Alice", has status "active", has email "alice@example.com", has password_hash "@@password_hash@@", has credential_version "initial";
+$bob isa person, has identity_id "bob", has name "Bob", has status "active", has email "bob@example.com", has password_hash "@@password_hash@@", has credential_version "initial";
+$carol isa person, has identity_id "carol", has name "Carol", has status "active", has email "carol@example.com", has password_hash "@@password_hash@@", has credential_version "initial";
+$bot isa service_account, has identity_id "bot", has name "Bot", has status "active", has service_name "deploy-bot";
+$dave isa person, has identity_id "dave", has name "Dave", has status "active", has email "dave@example.com", has password_hash "@@password_hash@@", has credential_version "initial";
+(tenant:$t,member:$alice) isa membership, has membership_role "owner", has start_at 2025-01-01T00:00:00;
+(tenant:$t,member:$bob) isa membership, has membership_role "member", has start_at 2025-01-01T00:00:00;
+(tenant:$t,member:$carol) isa membership, has membership_role "admin", has start_at 2025-01-01T00:00:00;
+(tenant:$t,member:$bot) isa membership, has membership_role "member", has start_at 2025-01-01T00:00:00;
+(tenant:$other,member:$dave) isa membership, has membership_role "owner", has start_at 2025-01-01T00:00:00;
+$r isa resource, has resource_id "files", has name "Files", has status "active";
+(tenant:$t,resource:$r) isa resource_ownership;
+$foreign isa resource, has resource_id "foreign", has name "Foreign", has status "active";
+(tenant:$other,resource:$foreign) isa resource_ownership;
+$team isa team, has team_id "builders", has name "Builders";
+(tenant:$t,team:$team) isa team_ownership;
+(team:$team,member:$bob,added_by:$alice) isa team_membership, has start_at 2025-01-01T00:00:00;
+$p isa access_policy, has policy_id "member-files", has name "Member Files", has status "active";
+(tenant:$t,policy:$p) isa policy_ownership;
+$v isa policy_revision, has revision_id "member-files-v1", has description "Members may read files", has required_role "member";
+(policy:$p,version:$v) isa policy_version;
+(version:$v,resource:$r) isa policy_scope, has permission_level "read";
+$g isa policy_access_grant, links (tenant:$t,grantee:$bob,resource:$r,grantor:$alice,policy_version:$v),
+  has grant_id "direct-read", has permission_level "read", has effect "allow", has start_at 2025-01-01T00:00:00;
+$tg isa exception_access_grant, links (tenant:$t,grantee:$team,resource:$r,grantor:$alice),
+  has grant_id "team-write", has permission_level "write", has effect "allow", has start_at 2025-01-01T00:00:00,
+  has end_at 2027-01-01T00:00:00, has reason "Temporary integration project";
+$bg isa exception_access_grant, links (tenant:$t,grantee:$bot,resource:$r,grantor:$alice),
+  has grant_id "bot-write", has permission_level "write", has effect "allow", has start_at 2025-01-01T00:00:00,
+  has reason "Deployment automation";
+$dg isa exception_access_grant, links (tenant:$other,grantee:$dave,resource:$foreign,grantor:$dave),
+  has grant_id "foreign-read", has permission_level "read", has effect "allow", has start_at 2025-01-01T00:00:00, has reason "Tenant B fixture";

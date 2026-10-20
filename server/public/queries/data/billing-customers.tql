@@ -1,0 +1,2 @@
+match $c isa bill_customer;
+fetch {"id":$c.bill_key,"name":$c.name,"email":$c.bill_email,"policy":$c.bill_policy,"choice":$c.bill_choice,"manual_provider":$c.bill_provider,"revision":$c.bill_revision};

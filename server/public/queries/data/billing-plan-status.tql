@@ -1,0 +1,3 @@
+match $p isa bill_plan, has bill_key @@request_id@@;
+update $p has bill_status @@status@@;
+fetch {"id":$p.bill_key,"status":$p.bill_status};

@@ -18,7 +18,7 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: TYPEDB_DB
-        value: business_dev
+        value: business_native_dev
       - key: TYPEDB_TLS
         value: "true"
       - key: TYPEDB_FORCE_RECREATE

@@ -1,105 +1,46 @@
 use dog_core::DogAppBuilder;
 use serde_json::Value;
 use std::sync::Arc;
-pub(crate) mod onboarding;
-pub mod recovery;
+pub(crate) mod data;
+pub mod mercury;
+pub mod stripe;
 mod types;
 pub use types::*;
-mod apps;
-mod authentication;
-pub mod billing;
-mod memberships;
-pub mod payments;
-mod policy_state;
-mod records;
-mod workspace;
+pub(crate) mod authentication;
 
 pub fn configure(
     builder: &mut DogAppBuilder<Value, BusinessParams>,
     auth: Arc<authentication::AuthService>,
     state: Arc<crate::typedb::TypeDBState>,
 ) -> anyhow::Result<()> {
-    builder.register_service("authentication", auth.clone());
-    if std::env::var("PAYMENTS_SANDBOX_ENABLED").as_deref() == Ok("true")
-        && std::env::var("PAYMENTS_BROWSER_APP").is_ok()
-    {
-        builder.register_service(
-            "payments-sandbox-actions",
-            Arc::new(payments::browser::Browser::new(
-                state.clone(),
-                auth.clone(),
-            )?),
-        );
-    }
-    builder.register_service(
-        "recovery",
-        Arc::new(recovery::RecoveryService::new(state.clone())),
-    );
-    builder.register_service(
-        "onboarding",
-        Arc::new(onboarding::OnboardingService::new(
-            state.clone(),
-            auth.clone(),
-        )),
-    );
-    builder.register_service(
-        "billing-actions",
-        Arc::new(billing::actions::Actions::new(state.clone(), auth.clone())),
-    );
-    for (name, kind) in [
-        (
-            "billing-customers",
-            billing::billing_shared::Kind::Customers,
-        ),
-        ("billing-plans", billing::billing_shared::Kind::Plans),
-        ("billing-invoices", billing::billing_shared::Kind::Invoices),
-    ] {
-        builder.register_service(
-            name,
-            Arc::new(billing::BillingService::new(
-                state.clone(),
-                auth.clone(),
-                kind,
-            )),
-        );
-    }
-
-    builder.register_service(
-        "records",
-        Arc::new(records::RecordsService::new(state.clone(), auth.clone())),
-    );
-    builder.register_service(
-        "workspace-records",
-        Arc::new(workspace::WorkspaceService::new(
-            state.clone(),
-            auth.clone(),
-        )),
-    );
-    builder.register_service(
-        "memberships",
-        Arc::new(memberships::MembershipsService(
-            workspace::WorkspaceService::new(state.clone(), auth.clone()),
-        )),
-    );
-    for (name, target) in [
-        ("access-grants", policy_state::Target::Grant),
-        ("entitlements", policy_state::Target::Entitlement),
-        ("team-memberships", policy_state::Target::TeamMembership),
-    ] {
-        builder.register_service(
-            name,
-            Arc::new(policy_state::PolicyStateService(
-                workspace::WorkspaceService::new(state.clone(), auth.clone()),
-                target,
-            )),
-        );
-    }
-    builder.register_service(
-        "apps",
-        Arc::new(apps::AppsService(workspace::WorkspaceService::new(
-            state, auth,
-        ))),
-    );
+    builder.register_service("authentication", auth);
     authentication::authentication_shared::register_hooks(builder)?;
+    builder.register_service("data", Arc::new(data::DataService::new(state)));
+    let authentication: Arc<dog_auth::AuthenticationService<BusinessParams>> = builder
+        .get("authentication")
+        .ok_or_else(|| anyhow::anyhow!("Authentication service missing"))?;
+    data::data_shared::register_hooks(builder, authentication.clone())?;
+    if let Some(credentials) = mercury::auth_mercury::AuthMercuryState::from_env()? {
+        let state = mercury::adapters::mercury_adapter::MercuryState::new(Arc::new(
+            mercury::adapters::mercury_adapter::MercuryHttp::new()?,
+        ));
+        mercury::configure(
+            builder,
+            authentication.clone(),
+            Arc::new(state),
+            Arc::new(credentials),
+        )?;
+    }
+    if let Some(credentials) = stripe::auth_stripe::AuthStripeState::from_env()? {
+        let state = stripe::adapters::stripe_adapter::StripeState::new(Arc::new(
+            stripe::adapters::stripe_adapter::StripeHttp::new()?,
+        ));
+        stripe::configure(
+            builder,
+            authentication,
+            Arc::new(state),
+            Arc::new(credentials),
+        )?;
+    }
     Ok(())
 }

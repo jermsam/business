@@ -1,0 +1,7 @@
+match
+$actor isa person, has identity_id @@identity_id@@;
+$t isa tenant, has tenant_id @@tenant_id@@;
+let $now=request_now();
+let $admin=request_manage($t); $admin==true;
+let $i,$g in request_excess($t);
+fetch { "identity_id":$i.identity_id,"grant_id":$g.grant_id };

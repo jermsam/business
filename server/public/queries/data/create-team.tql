@@ -1,0 +1,10 @@
+match
+$actor isa person,has identity_id @@identity_id@@;
+$t isa tenant,has tenant_id @@tenant_id@@;
+let $now=request_now();
+let $admin=request_manage($t);$admin==true;
+select $t;distinct;
+put $team isa team,has team_id @@team_id@@,has name @@name@@;
+(tenant:$t,team:$team) isa team_ownership;
+update $t has revision @@revision@@;
+fetch {"id":$team.team_id,"name":$team.name};

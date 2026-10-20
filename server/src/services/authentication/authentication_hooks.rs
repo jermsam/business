@@ -44,7 +44,6 @@ impl DogAfterHook<Value, BusinessParams> for StripPasswordFromAuthResult {
         };
 
         match result {
-            //TODO: NB: Might not be needed
             HookResult::One(v) => {
                 if let Some(user) = v.get_mut("user").and_then(|u| u.as_object_mut()) {
                     user.remove("password");

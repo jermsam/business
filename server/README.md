@@ -1,6 +1,318 @@
-# Business server
+# Business backend
 
-This application uses published DogRS 0.3.0 crates, dog-transport HTTP hosted by
+One DogRS application, one canonical TypeDB model, one executable: `server`.
+There is no alternate rebuild server or legacy fallback.
+
+Human first. Simple first. Local first.
+
+## Structure and responsibilities
+
+- `src/app.rs` composes the same application used by the executable and integration tests.
+- `src/auth/` uses dog-auth/dog-auth-local for credentials, JWT verification and persisted revocation. Current identity, credential version and tenant membership are checked for each protected call.
+- `src/services/data/` exposes only custom `read` and `write`. The frontend sends complete TypeQL. Hooks validate the transport envelope and bind freshly verified scope; dog-typedb's schema-policy executor enforces the model. There is no per-query registry.
+- `src/schema.tql`, `src/functions.tql`, `src/schema-policy.tql` and `src/billing.tql` define identities, membership, ownership, grants, reviews and domain rules. Security functions and annotations are not replaced with Rust domain switches.
+- Provider resources have `_service`, `_shared`, `_hooks` and `_schema` modules; common provider hooks live in `hooks/`, credentials in `auth-<provider>/`, and HTTP in adapters. Providers do not query TypeDB.
+- `src/database.rs` and the `database` CLI handle explicit provisioning. Startup verifies the canonical model and never migrates, seeds or wipes data.
+- Tests live under `tests/`; no dormant test files for removed services are presented as coverage.
+
+The current backend exposes authentication, protected data queries and provider proxies.
+It does **not** expose the removed billing/onboarding/recovery/payment-demo routes.
+Recurring collection, email delivery, store checkout coordination, webhook ingestion
+and Gelato fulfillment are not implemented by these proxies. No obsolete queue
+worker or sandbox generator is kept to imply otherwise. The protected billing
+graph is available through data queries; it is not an automatic collection engine.
+
+## Provisioning and launch
+
+Use a private environment file outside Git (permissions 0600). See `.env.example`.
+Runtime requires non-admin TypeDB credentials, TLS, an existing canonical database
+and `AUTH_JWT_SECRET` of at least 32 nonblank bytes.
+
+Use separate operator credentials to provision a **new** target such as
+`business_native_dev` when an existing `business_dev` still contains the old model:
+
+```sh
+BUSINESS_ENV_FILE=/private/admin.env cargo run --locked --bin database -- create
+BUSINESS_ENV_FILE=/private/admin.env cargo run --locked --bin database -- verify
+BUSINESS_ENV_FILE=/private/admin.env cargo run --locked --bin database -- bootstrap
+BUSINESS_ENV_FILE=/private/runtime.env cargo run --locked --bin server
+```
+
+Both environment files must explicitly select the intended `TYPEDB_DB`.
+Bootstrap additionally requires `BUSINESS_OWNER_EMAIL`, `BUSINESS_OWNER_NAME`,
+`BUSINESS_TENANT_NAME` and `BUSINESS_OWNER_PASSWORD` (12–72 bytes). It works
+only on an empty identity registry and uses a unique bootstrap record to arbitrate
+concurrent attempts. It prints tenant/identity IDs, never credentials.
+Create refuses an existing target; unknown commands fail before connecting.
+`list` is read-only; `create-user` requires operator-supplied
+`BUSINESS_NEW_USER` and `BUSINESS_NEW_PASSWORD` and never replaces an account.
+
+There is no destructive reset or automatic migration from the old model. Preserve
+existing databases and reconcile any provider records before an independently
+approved cutover. The Render blueprint targets `business_native_dev`, disables
+automatic deployment and keeps credentials external. Changing that file does not
+provision or deploy anything.
+Any previously deployed billing scheduler must be retired as an explicit
+deployment action; removing its source does not disable a remote cron job.
+
+## HTTP contract
+
+Use `Authorization: Bearer <token>` and `x-tenant-id` on protected calls.
+Local sign-in is POST `/authentication` with strategy `local`, email and password.
+DELETE `/authentication` revokes the supplied token durably.
+
+POST `/data` with `x-service-method: read` or `write` and only
+`{"query":"complete TypeQL"}`. The response is the DogRS
+`ok.answers` envelope, never a raw query echo. Credentials/revocation fields are
+hidden by the model. The publicly served `/queries/data/*.tql` files are examples
+for the browser, not an authorization registry; `/data-client.js` sends queries.
+
+`/health` is public. API execution has a per-process active budget
+(`BUSINESS_ACTIVE_REQUESTS`, 1–32), 32 waiting slots and a five-second admission
+deadline. Overload returns 503 without starting the operation.
+If an additional trusted gateway is used, configure `BUSINESS_GATEWAY_SECRET`
+(at least 32 bytes) and supply `x-gateway-secret` on API requests. This is
+additional protection, never a replacement for tenant authentication.
+
+## Verification
+
+```sh
+cargo build --locked --all-targets
+cargo test --locked --all-targets
+cargo test --locked --doc
+cargo clippy --locked --all-targets -- -D warnings
+node --test tests/frontend/data-client.test.mjs
+BUSINESS_ENV_FILE=/private/dev.env BUSINESS_RUNTIME_ENV_FILE=/private/runtime.env cargo test --locked --test backend -- --ignored --test-threads=1
+```
+
+The real integration suite uses existing development-cluster credentials and
+generated `business_backend_test_<UUID>` databases only. It checks RBAC
+decisions, frontend queries, hidden data, rollback, concurrency, credential rotation
+and membership expiry. The executable test provisions and bootstraps a disposable
+target using the actual CLI, starts the actual server with non-admin credentials,
+then checks gateway enforcement, owner login, data writes/reads and logout.
+Disposable targets are cleaned up; configured databases are never deleted.
+Provider sandbox tests are separately gated and never imply live-money acceptance.
+Mercury sandbox access currently has an external IP-allowlist restriction.
+
+### Verification evidence — October 20, 2026
+
+All-target debug builds, release builds of both executables, formatting and
+Clippy with warnings denied pass. The final published-0.3.3 dependency run passed
+29 library tests, two layout tests, all four real TypeDB backend tests,
+and three frontend-client tests. The real Stripe test-mode lifecycle passed in
+the earlier consolidation run; it was not repeated for the compiler-only patch.
+All Rust source/test files are reachable from Cargo targets; disconnected
+modules and old test files are no longer silently outside build coverage.
+Generated test databases were cleaned up. No production database, live payment,
+deployment or external credential configuration was changed.
+
+### Review failure investigation and fix
+
+The first review 500 lost its underlying cause, so later passing runs were not
+accepted as a resolution. Focused concurrent reviews subsequently reproduced a
+30-second pre-commit deadline failure without fault injection. A controlled
+probe then added 250 ms to each compiler schema-introspection round trip: the
+old compiler made 42 such requests before its first mutation, and all four
+concurrent reviews returned the published executor's 500 at about 31 seconds.
+Compilation, not execution of the mutation, consumed most of the budget.
+
+dog-typedb 0.3.3 fixes that excessive introspection by reusing immutable schema
+metadata inside the same transaction and across its checkpoints. It never caches
+frontend queries, policy decisions, authentication, membership or application
+data, and never reuses metadata across transactions. The identical latency probe
+needed 9 lookups for the first checkpoint and 12 for the entire review write;
+attempts completed in roughly 6–8 seconds without increasing the 30-second limit.
+The probe deliberately kept the old timeout-to-500 mapping, demonstrating that
+the result is not merely a changed HTTP error classification. No write was retried.
+
+The fix also retains private error causes and execution phases, keeps them out
+of client responses, and returns 409 only for TypeDB's structured STC2 commit
+rejection. Lost connections and commit deadlines remain unknown outcomes; the
+framework never automatically replays them. The tenant revision update remains
+in place, preserving conflict detection between concurrent policy changes.
+
+Regression coverage includes real compiler round-trip reuse and fresh transaction
+metadata, nine distinct reviews, successful-repeat deduplication, denied self-review
+with unchanged history/revision, concurrent authenticated service calls, real HTTP
+reviews, and reconciliation of every response against persisted history. Before
+publication, all five framework live tests and all four Business backend acceptance
+tests passed (Business: 187.46 seconds). The original historical request cannot be
+retroactively attributed with certainty because its cause was discarded; the
+reproduced review timeout now has a demonstrated code fix and before/after evidence.
+
+dog-typedb 0.3.3 is published on crates.io and pinned exactly in Business's
+manifest and registry lockfile. A fresh run against the downloaded release,
+without a local patch, passed all four backend tests in 186.74 seconds. Debug
+and release builds, unit/layout/frontend tests, formatting and all-target Clippy
+also pass. No dependency other than dog-typedb changed during this patch upgrade.
+No application deployment or live payment was performed.
+
+The real Mercury sandbox check remains blocked: both the service chain and a
+direct accounts request were rejected by the provider's IP allowlist (direct
+HTTP 401). Local Mercury auth, resource and HTTPS contracts pass. Do not call
+this external acceptance check green or weaken the allowlist to bypass it.
+
+## Model references
+
+The model follows [TypeDB's RBAC in Business guide](https://typedb.com/docs/learn-typedb/rbac-in-business/).
+Service composition follows the
+[DogRS examples](https://github.com/Jitpomi/dogrs/tree/main/dog-examples),
+especially fleet-queue and social-typedb. TypeDB functions alone are not an
+automatic query authorization boundary: the protected data service always uses
+dog-typedb's authenticated schema-policy executor.
+
+## Stripe provider services
+
+Stripe follows the same provider layout as Mercury. Each resource has its own
+service, shared hook registration, hooks and schema. Shared authentication and
+request-safety hooks are in `src/services/stripe/hooks/`. Credentials live only
+in `auth-stripe`; the adapter contains HTTP/endpoint/form/error handling, not
+TypeDB queries, invoice workflows or application business rules.
+
+| Service under /stripe/ | Methods beyond find/get |
+| --- | --- |
+| customers | create, patch, remove, payment_methods |
+| invoices | create, patch, remove (draft), finalize, pay, send, void, mark_uncollectible, attach_payment |
+| invoice-items | create, patch, remove |
+| checkout-sessions | create, patch, expire, line_items |
+| payment-methods | create (tokenized card), patch, attach, detach |
+| setup-intents | create, patch, confirm, cancel |
+| payment-intents | create, patch, confirm, cancel, capture |
+| invoice-payments | read-only |
+| charges | patch; use PaymentIntents instead of deprecated charge creation |
+| refunds | create, patch, cancel |
+| disputes | patch, close |
+| mandates | get only |
+
+Configure `STRIPE_CONNECTIONS_JSON` as an external secret containing an array of
+connections, each with `tenant_id`, `identity_ids`, `environment` (`test` or
+`live`), `token`, optional `connected_account`, and `write` (defaults false).
+No fallback global key is granted to every tenant. Configure each tenant against
+its own Stripe account/Connect account: JWT tenant checks do not partition
+customers within a shared upstream Stripe account. API keys are server-only.
+A configured Connect account cannot be overridden with client headers.
+The existing API version `2026-03-25.dahlia` is preserved.
+
+All resource calls reauthenticate using dog-auth, resolve credentials through the
+registered auth-stripe hooks, and run resource validation. Auth-stripe has no
+public route. Use a Bearer token and `x-tenant-id` for HTTP calls. Custom methods
+use POST to the collection with `x-service-method` and an `id` in the JSON body.
+Stripe partial updates use PATCH, not PUT. Unsupported HTTP methods return 405.
+
+Every provider POST requires a stable `Idempotency-Key`. It is namespaced by
+tenant, environment, Connect account and endpoint; retries of the same operation
+must keep the original key and body. Stripe's retention window is not permanent
+exactly-once delivery. GET and DELETE do not send the key. There are no automatic
+write retries or redirects. Reconcile uncertain outcomes before retrying. Amounts
+are integer minor units, never floating-point money. Raw card/bank credentials
+are rejected; collect them with Stripe-hosted UI or Stripe.js.
+
+Find returns one page, not a settled total. Use `limit` (1–100) and the last
+returned ID as `starting_after`; continue until an empty page. Custom list
+methods preserve Stripe's list envelope and `has_more`. These are provider
+proxies, not a completed storefront, webhook receiver or fulfillment workflow.
+
+Tests live in `tests/stripe/`:
+`cargo test --locked --lib stripe` exercises registered JWT/auth/resource hooks,
+resource/action endpoint mapping, tenant separation, validation, idempotency and
+real local HTTPS transport. The ignored `real_stripe_test_customer_lifecycle`
+requires `BUSINESS_ENV_FILE` pointing to an external dotenv file with
+`STRIPE_SECRET_KEY` in TEST mode. It creates synthetic resources only, never
+confirms a payment, sends an invoice, or uses real money. Real sandbox coverage
+does not imply live-account or all-action acceptance.
+
+
+## Mercury provider services
+
+Mercury follows the resource-service/shared-adapter pattern. Resource services
+delegate to `src/services/mercury/adapters/mercury_adapter.rs`; that adapter makes
+Mercury HTTP calls only. It contains no TypeDB queries or billing workflows.
+
+| Service | Methods |
+| --- | --- |
+| `mercury/accounts` | `find`, `get` |
+| `mercury/customers` | `find`, `get`, `create`, `update`, `remove` |
+| `mercury/invoices` | `find`, `get`, `create`, `update`, custom `cancel`, custom `pdf` |
+| `mercury/transactions` | `find`, `get` |
+
+Mercury's POST edit endpoints require complete resource data. They are **update**,
+not patch. Invoice updates must explicitly retain or clear optional fields.
+Neither accounts nor transactions expose mutation methods. Customer deletion
+requires one UUID; bulk deletion is forbidden. Invoices are cancelled, not deleted.
+Account `get` searches the documented paginated accounts API: it does not invent
+an undocumented single-account endpoint. `find` returns one page of records;
+use `limit` (1–1000), `order`, `start_after` or `end_before` to page explicitly.
+Transaction filters are documented in `transactions/transactions_schema.rs`; array filters use
+comma-separated values in REST query parameters and become repeated upstream keys.
+
+Each resource registers strict dog-auth JWT authentication, the
+`auth-mercury` credential-resolution hook, and its own request/response validators.
+The resource's `_schema.rs` defines its contract and its `_hooks.rs` invokes those
+checks. There is no shared Mercury resource-validation dispatcher.
+Mercury-wide resource security hooks live in `mercury/hooks/`: one registration
+helper installs strict Business authentication followed by credential resolution
+through the registered `auth-mercury` service. Resource validation follows these
+shared hooks; credential storage and auth-service-specific hooks stay in
+`auth-mercury/`.
+Internal calls require a fresh bearer token too. No request can choose an API host,
+provider token or model. Credentials are server-only and excluded from serialized
+parameters and debug output. No global Mercury token is shared across arbitrary
+tenants. Connection access is explicit and read-only unless configured otherwise.
+
+`auth-mercury/` has its own service, hooks, shared definitions and schema. Its
+server-only custom `resolve` method resolves the connection for the freshly
+verified Business tenant/identity. Resource hooks call it through
+`ctx.services.app().service(...)`, so the auth service's hooks run; they do not
+access the raw service registry. It has no public HTTP route and explicitly
+rejects external-provider calls. Tokens are returned only to the internal caller
+and bound into non-serializable, debug-redacted request credentials. The Mercury
+HTTP adapter owns neither the credential store nor resource request validation.
+The existing connection mode is API-token authentication: these tokens are
+configured by the operator, not obtained/refreshed through an invented OAuth flow.
+
+Set `MERCURY_CONNECTIONS_JSON` in the external secret environment file to a JSON
+array with `tenant_id`, `identity_ids` (array), `environment` (`sandbox` or
+`production`), `token`, and `write` (default false). Use the exact verified identity
+IDs and a token created in the corresponding Mercury environment. One connection
+per tenant is currently supported. Omit this setting to leave Mercury unregistered.
+This is deployment credential configuration, not a TypeQL query registry.
+
+Standard methods use the corresponding REST verbs (`PUT` for full `update`).
+Custom methods use `POST /mercury/invoices`, `x-service-method: cancel` or `pdf`,
+and body `{ "id": "<invoice UUID>" }`, together with the normal bearer token and
+`x-tenant-id` headers. GET cannot trigger cancellation. PDF results are a lossless
+JSON envelope with `contentType`, `encoding: "base64"`, and `data`.
+
+Creating an invoice requires an explicit `sendEmailOption` (`DontSend` or
+`SendNow`), because Mercury otherwise sends it immediately. Requests do not round
+money, silently merge partial updates, follow redirects, or retry mutations.
+After an uncertain result, reconcile against Mercury before retrying. Do not
+assume Mercury implements an idempotency guarantee that its endpoint does not
+document. JSON and PDF response sizes are bounded; provider error bodies and
+credentials are not exposed to callers.
+
+Run `cargo test --locked --lib mercury` for the provider module tests, or
+`cargo test --locked --lib` for all currently registered unit tests. Tests are in
+`tests/mercury/` and exercise registered DogRS services, real JWT verification,
+HTTP routing, and actual local HTTPS traffic. They never call Mercury or send
+real invoices. A real sandbox smoke check needs a separately configured sandbox
+token; local fixture tests are not evidence of live account/API access.
+
+Check every backend target with `cargo check --locked --all-targets`, build with
+`cargo build --locked --all-targets`, and run the registered backend suite with
+`cargo test --locked --all-targets`. The obsolete operations executable, module,
+tests and runbook have been removed; no database or provider data was removed.
+Deleted billing/onboarding/payment services have not been restored to make the
+provider services compile. External sandbox and disposable TypeDB tests are
+explicitly ignored by default and must be run separately with development
+credentials; a green local suite is not proof of production acceptance.
+
+References: [Mercury invoicing](https://docs.mercury.com/docs/invoicing),
+[full invoice updates](https://docs.mercury.com/reference/updateinvoice),
+[sandbox setup](https://docs.mercury.com/docs/using-mercury-sandbox).
+
+This application uses published dog-typedb 0.3.3, dog-auth 0.3.1, and other DogRS 0.3.0 crates, dog-transport HTTP hosted by
 Axum, and TypeDB 3.13.6 (the driver version required by dog-typedb).
 
 Development and production use the same code, TLS validation, auth strategy and
@@ -8,168 +320,3 @@ durable TypeDB token store. Set `BUSINESS_ENV_FILE` to an owner-readable file
 outside the project. The prepared configurations are in
 `~/.config/jitpomi/business/dev.env` and `prod.env`. Their credentials must not be
 committed or pasted into logs. Use a dedicated non-admin runtime account.
-
-```sh
-BUSINESS_ENV_FILE="$HOME/.config/jitpomi/business/dev.env" cargo run --locked
-```
-
-The HTTP server binds to the configured interface (prepared configs use loopback).
-`/health` is public. `/authentication` accepts local email/password authentication
-with `x-tenant-id` naming a stable organization UUID (or current domain alias); the resolver verifies the user's actual
-tenant membership. Passwords stored in TypeDB must be bcrypt hashes. No registration
-or calendar/invoice endpoints are implemented yet. The legacy raw `/subjects`
-service is no longer registered, including for internal service calls.
-
-TLS is mandatory and AUTH_JWT_SECRET must contain at least 32 bytes. Database
-creation/schema loading is explicit via the database binary; normal startup never
-creates, resets, or deletes a database. TYPEDB_FORCE_RECREATE is rejected.
-
-The free hosted cluster pauses after three inactive days and provides no managed
-backups. Development and production databases share cluster resources. TypeDB's
-current standard-user model allows access to all databases, so their separation is
-not an enforced database credential boundary. Do not expose credentials to browser
-clients. A dedicated cluster is needed for stronger environment isolation.
-
-Tests: `cargo test --locked`. The ignored `hosted_auth_and_revocation` test only
-permits `business_dev`, creates uniquely named synthetic fixtures, and checks login,
-wrong-tenant rejection, redaction, logout, public query blocking and concurrent
-refresh consumption against the real cloud. It retains synthetic fixtures for
-inspection. Do not point tests at production.
-
-Verified on the real free TypeDB Cloud cluster: schema/functions loaded for both
-Business databases; development login, wrong-tenant rejection for local login and JWT reuse, password redaction,
-logout/revocation, blocked raw queries, and concurrent refresh consumption pass.
-
-Remaining release work includes authorization for additional domain services, abuse/rate limiting,
-scheduled backup retention and broader availability requirements. The foundation is now
-publicly deployed on Render Free against `business_dev`; the live validation record
-is in `docs/production-validation-progress.md`. Backup restoration has been tested,
-but the drill is not a scheduled off-cluster backup service. A bounded acceptance
-pass is not a certification of every future domain service or always-on hosting.
-
-## Tenant-scoped private records
-
-`/records` is a deliberately small business-data foundation, not a calendar or
-invoicing implementation. Every operation requires a valid bearer JWT plus
-`x-tenant-id`. The selected tenant, current membership and verified creator scope
-all reads and writes. A user belonging to A and B must select A to access their A
-records; their B membership cannot bypass that boundary. Records are private to
-the creator even within one tenant. Team sharing, product entitlements and project action permissions are implemented
-separately by the workspace APIs described below; they do not widen this private API.
-
-- `POST /records` accepts only `{ "name": "Example" }`; IDs, tenant and creator
-  are assigned by the server. Unknown fields are rejected.
-- `GET /records` returns at most 100 own records in the selected tenant, sorted
-  by ID. There is no pagination/filter API yet.
-- `GET`, `PUT`, `PATCH`, `DELETE /records/{uuid}` only act on that same scope.
-  PUT/PATCH accept the same name-only input. Bulk updates/deletes are unsupported.
-- Names currently allow 1–128 ASCII letters/numbers, spaces and `.,_-()`.
-- A foreign record and a nonexistent record both return 404. Missing/invalid
-  credentials or revoked membership return 401. Internal callers must also supply
-  a valid token; setting an authenticated flag does not bypass validation.
-
-The identity is verified before database access, and membership is also matched
-inside the same TypeDB transaction as the data operation. Revocations apply to
-subsequent requests; already-running transactions use their database snapshot.
-Database credentials remain privileged and must never be given to clients.
-
-For an existing database, apply the additive schema with `database migrate-records`
-using the provisioning account and explicit `TYPEDB_DB`. This does not reload IAM
-functions or recreate the database. Fresh provisioning includes these types in
-`schema.tql`. Normal application startup does not migrate schema.
-
-Run both hosted suites on the real free development database:
-
-```sh
-BUSINESS_ENV_FILE="$HOME/.config/jitpomi/business/dev.env" \
-  cargo test --locked -- --include-ignored --test-threads=1
-```
-
-`hosted_business_data_isolation` exercises the actual Axum/DogRS HTTP router with
-unique synthetic identities and tenants: cross-tenant list/get/update/patch/delete,
-a user belonging to both tenants, same-tenant creator isolation, forged ownership
-fields, valid own-record CRUD, membership removal and logout. It also checks that
-internal calls cannot forge authentication. It refuses any database name other
-than `business_dev` and retains synthetic fixtures for inspection.
-
-These tests cover this records API, not every legacy IAM function or future
-calendar, invoice, app-entitlement or project-sharing endpoint. New domain services
-must enforce and test their own selected-tenant and action permissions.
-
-## TypeDB design reference
-
-See [TypeDB foundation](docs/typedb-foundation.md) for the JITPOMI umbrella model,
-source-backed constraints and next implementation sequence.
-[Reading coverage](docs/typedb-reading-coverage.md) distinguishes reviewed material
-from the remaining documentation.
-
-## Shared organization and product access
-
-See [Workspace access implementation](docs/workspace-access.md) for the new TypeQL policies, app/project discovery, shared-record endpoints, explicit development migration and live test command. Apply the access migration before running this server revision against an existing database. Existing private records remain private.
-
-## Identity and concurrency hardening
-
-[Audit and validation](docs/identity-concurrency-audit.md) covers stable UUID token subjects, canonical memberships, owner-only administration and coordinated writes. Apply the development access migration before using this revision; existing email-subject tokens require a new login.
-
-## Deployment validation
-
-See [current deployment validation evidence](docs/production-validation-progress.md) for recovery, restore, policy-query measurements and deployment/load results. The Render blueprint uses only the free plan. Do not infer full production validation from the correctness tests alone.
-
-The ignored hosted HTTP suites can target the validation deployment by setting
-`BUSINESS_TEST_BASE_URL=https://jitpomi-business-validation.onrender.com` alongside
-an explicitly selected `BUSINESS_ENV_FILE` for `business_dev`. Their synthetic
-fixtures are still provisioned directly in that development database; HTTP calls
-then use the public endpoint. The local JWT configuration must match the tested
-service for the suites that also check internal-service authentication. Never
-point this harness at a production database. Secrets are not command arguments.
-
-`public_restart_prepare` saves a synthetic record/session fixture at a new path
-specified by `BUSINESS_RESTART_FIXTURE` with mode 0600. Request exactly one Render
-restart, wait for a new process start in provider logs and healthy HTTPS, then run
-`public_restart_verify` with the same private fixture. It verifies persisted data
-and logout, then removes its record and logs out the remaining token. A failed
-mutation response can mean the write committed: inspect the saved resource before
-retrying; this harness does not automatically retry writes. Do not commit fixture
-files or place them in the public repository.
-
-The validation deployment and development environment use
-`BUSINESS_ACTIVE_REQUESTS=3`. This limits active database-backed HTTP requests per
-process; at most 32 more can wait, for up to five seconds. Startup rejects active
-budgets outside 1–32. The library fallback is two when the setting is absent.
-`Server-Timing` reports admission wait and handler duration without identity or
-query data. Health checks bypass admission. These limits are per process, not a
-global rate limit or an authentication brute-force defense.
-
-Public acceptance tests now reuse a reqwest HTTPS connection pool, with certificate
-verification enabled, redirects disabled and automatic retries disabled. Use
-`BUSINESS_TEST_HTTP_CLIENT=curl` to reproduce the original per-request curl mode.
-`hosted_admission_diagnostics` is a short attribution run, not an acceptance pass.
-The full `hosted_business_soak` gate remains ten tenants, ten users, five minutes,
-at least 1,000 requests, p95 <= 5 seconds and p99 <= 10 seconds, with no unexpected
-responses. Keep these modes distinct in reports.
-
-
-Run the public correctness/restore suite serially, then the load gate separately
-so the restore and concurrency drills do not contaminate capacity measurements:
-
-```sh
-export BUSINESS_ENV_FILE="$HOME/.config/jitpomi/business/render-validation.env"
-export BUSINESS_TEST_BASE_URL=https://jitpomi-business-validation.onrender.com
-cargo test --locked --lib -- --include-ignored --test-threads=1 --nocapture --skip hosted_business_soak --skip hosted_admission_diagnostics --skip hosted_policy_query_diagnostics --skip public_restart_
-cargo test --locked --lib hosted_business_soak -- --ignored --nocapture
-```
-
-The restart pair additionally requires the controlled provider restart described
-above. Preserve failed attempts in the evidence; do not retry mutations or lower
-the acceptance thresholds to turn a failed run into a pass.
-
-Customer invitations are emailed after the invitation transaction commits. Configure
-`BILLING_MAIL_ENABLED=true`, `RESEND_API_KEY`, `BILLING_EMAIL_FROM`, and
-`BILLING_PUBLIC_URL=https://jitpomi.com/account/`. In sandbox mode only addresses in
-`INVITATION_TEST_EMAILS` (comma separated; defaults to `BILLING_TEST_EMAIL`) may
-receive invitation mail. Payment email recipient restrictions are unchanged.
-The API reports `delivery.status=accepted` only after Resend accepts the message;
-this does not certify inbox delivery. `unconfirmed` leaves the created customer and
-link intact, with a copy-link fallback. Do not repeat customer creation after an
-uncertain send; resend from the existing customer instead. Resending explicitly
-invalidates the old unused link. Used invitations require password recovery.

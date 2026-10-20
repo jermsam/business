@@ -4,3 +4,5 @@
 **/target/
 
 **/.wrangler/
+.idea/
+.vscode/settings.json

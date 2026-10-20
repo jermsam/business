@@ -22,13 +22,7 @@ impl TypeDbTokenStore {
         format!("{:x}", hash.finalize())
     }
     async fn exists(&self, key: &str) -> Result<bool> {
-        #[cfg(test)]
-        let started = std::time::Instant::now();
-        #[cfg(test)]
-        crate::access::trace_enter("revocation-start");
         let out=self.adapter.read(json!({"query":format!(r#"match $t isa auth_revocation, has token_key "{key}"; fetch {{ "key": $t.token_key }};"#)})).await?;
-        #[cfg(test)]
-        crate::access::trace_stage("revocation-read", started);
         let rows = out
             .pointer("/ok/answers")
             .and_then(|v| v.as_array())
@@ -70,13 +64,5 @@ impl TokenStore for TypeDbTokenStore {
     }
 }
 #[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn issuer_and_token_are_unambiguous() {
-        assert_ne!(
-            TypeDbTokenStore::key("ab", "c"),
-            TypeDbTokenStore::key("a", "bc")
-        );
-    }
-}
+#[path = "../../tests/unit/auth/token_store/tests.rs"]
+mod tests;

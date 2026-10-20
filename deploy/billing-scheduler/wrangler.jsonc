@@ -1,8 +1,0 @@
-{
-  "name": "jitpomi-business-billing-scheduler",
-  "main": "worker.js",
-  "compatibility_date": "2026-10-08",
-  "workers_dev": false,
-  "triggers": { "crons": ["*/5 * * * *"] },
-  "vars": { "BUSINESS_URL": "https://jitpomi-business-validation.onrender.com" }
-}

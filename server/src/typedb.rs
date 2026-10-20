@@ -26,6 +26,7 @@ impl TypeDBState {
             driver.databases().contains(&database).await?,
             "Database does not exist; provision it explicitly before starting the server"
         );
+        crate::database::verify(&driver, &database).await?;
         app.set("typedb", Arc::new(Self { driver, database }));
         Ok(())
     }

@@ -24,17 +24,17 @@ static ACTIVE: LazyLock<Semaphore> =
 static WAITING: LazyLock<Semaphore> = LazyLock::new(|| Semaphore::new(32));
 
 pub(crate) async fn guard(request: Request, next: Next) -> Response {
-    if let Ok(secret) = std::env::var("PORTAL_ORIGIN_SECRET") {
+    if let Ok(secret) = std::env::var("BUSINESS_GATEWAY_SECRET") {
         use subtle::ConstantTimeEq;
         let supplied = request
             .headers()
-            .get("x-portal-secret")
+            .get("x-gateway-secret")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         if secret.len() < 32 || !bool::from(secret.as_bytes().ct_eq(supplied.as_bytes())) {
             return (
                 StatusCode::UNAUTHORIZED,
-                axum::Json(serde_json::json!({"message":"Portal access required"})),
+                axum::Json(serde_json::json!({"message":"Gateway access required"})),
             )
                 .into_response();
         }
@@ -70,33 +70,5 @@ fn overloaded() -> Response {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use tower::ServiceExt;
-    #[tokio::test]
-    async fn full_waiting_queue_rejects_before_handler() {
-        let held = WAITING.acquire_many(32).await.unwrap();
-        let app = axum::Router::new()
-            .route(
-                "/test",
-                axum::routing::get(|| async {
-                    panic!("An overloaded request must not reach the handler");
-                    #[allow(unreachable_code)]
-                    "unexpected"
-                }),
-            )
-            .route_layer(axum::middleware::from_fn(guard));
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/test")
-                    .body(axum::body::Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(response.headers()["retry-after"], "1");
-        drop(held);
-    }
-}
+#[path = "../tests/unit/admission/tests.rs"]
+mod tests;
