@@ -1,0 +1,8 @@
+match
+$actor isa person, has identity_id @@identity_id@@;
+$t isa tenant, has tenant_id @@tenant_id@@;
+let $now=request_now();
+$r isa resource, has resource_id @@resource_id@@;
+let $g,$source in request_paths($r,"read");
+$by isa identity; $g links(grantor:$by);
+fetch { "grant_id":$g.grant_id,"source":$source,"effect":$g.effect,"permission":$g.permission_level,"grantor":$by.identity_id };

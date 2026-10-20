@@ -1,0 +1,105 @@
+define
+# Canonical Business identity and access model. Provisioned explicitly, never at boot.
+# Human and machine identities share the same access model, as in the TypeDB guide.
+attribute identity_id, value string;
+attribute tenant_id, value string;
+attribute resource_id, value string;
+attribute grant_id, value string;
+attribute policy_id, value string;
+attribute revision_id, value string;
+attribute team_id, value string;
+attribute review_id, value string;
+attribute name, value string;
+attribute description, value string;
+attribute email, value string;
+attribute service_name, value string;
+attribute status, value string;
+attribute membership_role, value string @values("member", "admin", "owner");
+attribute required_role, value string @values("member", "admin", "owner");
+attribute permission_level, value string @values("read", "write", "admin");
+attribute effect, value string @values("allow", "deny");
+attribute start_at, value datetime;
+attribute end_at, value datetime;
+attribute reason, value string;
+attribute reviewed_at, value datetime;
+attribute review_outcome, value string @values("certified", "revoked");
+attribute revision, value string;
+attribute password_hash, value string;
+attribute credential_version, value string;
+attribute token_key, value string;
+entity auth_revocation, owns token_key @key;
+attribute bootstrap_id, value string;
+entity bootstrap_record, owns bootstrap_id @key;
+
+entity principal @abstract;
+entity identity @abstract, sub principal,
+  owns identity_id @key,
+  owns name @card(1),
+  owns status @card(1) @values("active", "suspended", "terminated");
+entity person sub identity, owns email @key, owns password_hash @card(1), owns credential_version @card(1);
+entity service_account sub identity, owns service_name @key;
+entity tenant,
+  owns tenant_id @key, owns name @card(1),
+  owns status @card(1) @values("active", "suspended"),
+  owns revision @card(1);
+entity team sub principal, owns team_id @key, owns name @card(1);
+entity resource,
+  owns resource_id @key, owns name @card(1),
+  owns status @card(1) @values("active", "suspended");
+
+relation membership,
+  relates tenant @card(1), relates member @card(1),
+  owns membership_role @card(1), owns start_at @card(1), owns end_at @card(0..1);
+tenant plays membership:tenant;
+identity plays membership:member;
+relation team_ownership, relates tenant @card(1), relates team @card(1);
+tenant plays team_ownership:tenant;
+team plays team_ownership:team @card(1);
+relation team_membership,
+  relates team @card(1), relates member @card(1), relates added_by @card(1),
+  owns start_at @card(1), owns end_at @card(0..1);
+team plays team_membership:team;
+identity plays team_membership:member, plays team_membership:added_by;
+relation resource_ownership, relates tenant @card(1), relates resource @card(1);
+tenant plays resource_ownership:tenant;
+resource plays resource_ownership:resource @card(1);
+
+# Policies are identifiable data; immutable revisions preserve the policy used
+# when a grant was approved. There is deliberately no public revision-update query.
+entity access_policy,
+  owns policy_id @key, owns name @card(1),
+  owns status @card(1) @values("active", "suspended");
+entity policy_revision,
+  owns revision_id @key, owns description @card(1), owns required_role @card(1);
+relation policy_ownership, relates tenant @card(1), relates policy @card(1);
+tenant plays policy_ownership:tenant;
+access_policy plays policy_ownership:policy @card(1);
+relation policy_version, relates policy @card(1), relates version @card(1);
+access_policy plays policy_version:policy;
+policy_revision plays policy_version:version @card(1);
+relation policy_scope,
+  relates version @card(1), relates resource @card(1), owns permission_level @card(1);
+policy_revision plays policy_scope:version;
+resource plays policy_scope:resource;
+
+# Every grant has an accountable grantor and either a policy revision or a reason.
+relation access_grant @abstract,
+  owns grant_id @key, owns permission_level @card(1), owns effect @card(1),
+  owns start_at @card(1), owns end_at @card(0..1),
+  relates tenant @card(1), relates grantee @card(1),
+  relates resource @card(1), relates grantor @card(1);
+relation policy_access_grant sub access_grant, relates policy_version @card(1);
+relation exception_access_grant sub access_grant, owns reason @card(1);
+tenant plays access_grant:tenant;
+principal plays access_grant:grantee;
+resource plays access_grant:resource;
+identity plays access_grant:grantor;
+policy_revision plays policy_access_grant:policy_version;
+
+# A review is a fact about a grant, not an overwritten flag on that grant.
+relation access_review,
+  owns review_id @key, owns reviewed_at @card(1),
+  owns review_outcome @card(1), owns reason @card(1),
+  relates grant @card(1), relates reviewer @card(1);
+access_grant plays access_review:grant;
+identity plays access_review:reviewer;

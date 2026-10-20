@@ -1,0 +1,7 @@
+match $c isa bill_customer, has bill_key @@customer_id@@;
+put $p isa bill_plan, has bill_key @@request_id@@, has name @@description@@,
+  has bill_amount @@amount_cents@@, has bill_due_days @@due_days@@,
+  has bill_anchor @@start_epoch@@, has bill_next @@start_epoch@@, has bill_sequence 0,
+  has bill_interval @@interval@@, has bill_status "active";
+  (customer:$c,plan:$p) isa bill_plan_owner;
+fetch {"id":$p.bill_key,"customer_id":$c.bill_key,"amount_cents":$p.bill_amount};

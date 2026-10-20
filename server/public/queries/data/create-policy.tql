@@ -1,0 +1,15 @@
+match
+$actor isa person,has identity_id @@identity_id@@;
+$t isa tenant,has tenant_id @@tenant_id@@;
+let $now=request_now();
+let $admin=request_manage($t);$admin==true;
+$r isa resource,has resource_id @@resource_id@@;
+(tenant:$t,resource:$r) isa resource_ownership;
+select $t,$r;distinct;
+put $p isa access_policy,has policy_id @@policy_id@@,has name @@name@@,has status "active";
+(tenant:$t,policy:$p) isa policy_ownership;
+$v isa policy_revision,has revision_id @@revision_id@@,has description @@description@@,has required_role @@required_role@@;
+(policy:$p,version:$v) isa policy_version;
+(version:$v,resource:$r) isa policy_scope,has permission_level @@permission@@;
+update $t has revision @@revision@@;
+fetch {"id":$p.policy_id,"revision_id":$v.revision_id};

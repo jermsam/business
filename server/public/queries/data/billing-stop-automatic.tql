@@ -1,0 +1,3 @@
+match $c isa bill_customer, has bill_key @@customer_id@@;
+update $c has bill_choice "manual";
+fetch {"id":$c.bill_key,"choice":$c.bill_choice};

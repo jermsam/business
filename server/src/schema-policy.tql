@@ -1,0 +1,225 @@
+define
+# Security policy declarations belong to the model, not a registry of queries.
+attribute password_hash @meta("dog.security.hidden", "true");
+attribute credential_version @meta("dog.security.hidden", "true");
+attribute token_key @meta("dog.security.hidden", "true");
+attribute name, value string @regex("\S[\s\S]{0,119}");
+attribute reason, value string @regex("\S[\s\S]{0,1023}");
+attribute description, value string @regex("\S[\s\S]{0,1023}");
+attribute revision, value string @regex("\S[\s\S]{0,127}");
+attribute resource_id, value string @regex("\S[\s\S]{0,127}");
+attribute team_id, value string @regex("\S[\s\S]{0,127}");
+attribute policy_id, value string @regex("\S[\s\S]{0,127}");
+attribute revision_id, value string @regex("\S[\s\S]{0,127}");
+attribute grant_id, value string @regex("\S[\s\S]{0,127}");
+attribute review_id, value string @regex("\S[\s\S]{0,127}");
+entity principal @meta("dog.security.scope", "scope_principal") @meta("dog.security.read", "scope_principal");
+entity identity @meta("dog.security.scope", "scope_identity") @meta("dog.security.read", "scope_identity");
+entity person @meta("dog.security.scope", "scope_identity") @meta("dog.security.read", "scope_identity");
+entity service_account @meta("dog.security.scope", "scope_identity") @meta("dog.security.read", "scope_identity");
+entity tenant @meta("dog.security.scope", "scope_tenant") @meta("dog.security.read", "scope_tenant"),
+  owns revision @meta("dog.security.update", "update_tenant_revision");
+entity resource @meta("dog.security.scope", "scope_resource") @meta("dog.security.read", "read_resource") @meta("dog.security.create", "create_resource");
+entity team @meta("dog.security.scope", "scope_team") @meta("dog.security.read", "scope_team") @meta("dog.security.create", "create_team");
+entity access_policy @meta("dog.security.scope", "scope_policy") @meta("dog.security.read", "scope_policy") @meta("dog.security.create", "create_policy");
+entity policy_revision @meta("dog.security.scope", "scope_version") @meta("dog.security.read", "scope_version") @meta("dog.security.create", "create_version");
+relation resource_ownership @meta("dog.security.scope", "scope_resource_owner") @meta("dog.security.read", "scope_resource_owner") @meta("dog.security.create", "create_resource_owner");
+relation team_ownership @meta("dog.security.scope", "scope_team_owner") @meta("dog.security.read", "scope_team_owner") @meta("dog.security.create", "create_team_owner");
+relation policy_ownership @meta("dog.security.scope", "scope_policy_owner") @meta("dog.security.read", "scope_policy_owner") @meta("dog.security.create", "create_policy_owner");
+relation policy_version @meta("dog.security.scope", "scope_policy_version") @meta("dog.security.read", "scope_policy_version") @meta("dog.security.create", "create_policy_version");
+relation policy_scope @meta("dog.security.scope", "scope_policy_scope") @meta("dog.security.read", "scope_policy_scope") @meta("dog.security.create", "create_policy_scope");
+relation access_grant @meta("dog.security.scope", "scope_grant") @meta("dog.security.read", "read_grant");
+relation policy_access_grant @meta("dog.security.scope", "scope_grant") @meta("dog.security.read", "read_grant") @meta("dog.security.create", "create_policy_grant");
+relation exception_access_grant @meta("dog.security.scope", "scope_grant") @meta("dog.security.read", "read_grant") @meta("dog.security.create", "create_exception_grant");
+relation access_review @meta("dog.security.scope", "scope_review") @meta("dog.security.read", "scope_review") @meta("dog.security.create", "create_review");
+
+fun request_now($tenant: string, $actor: string, $now: datetime) -> datetime @meta("dog.security.context", "true"):
+  match $tenant != ""; $actor != ""; let $time=$now;
+  return first $time;
+fun scope_tenant($tenant: string, $actor: string, $now: datetime, $t: tenant) -> boolean:
+  match $t has tenant_id == $tenant;
+    $i isa person, has identity_id == $actor;
+    let $ok=active_member($i,$t,$now); $ok==true;
+  return check;
+fun request_manage($tenant: string, $actor: string, $now: datetime, $t: tenant) -> boolean @meta("dog.security.context", "true"):
+  match let $scoped=scope_tenant($tenant,$actor,$now,$t); $scoped==true;
+    $i isa person, has identity_id == $actor;
+    let $ok=can_manage_access($i,$t,$now); $ok==true;
+  return check;
+fun scope_identity($tenant: string, $actor: string, $now: datetime, $i: identity) -> boolean:
+  match $t isa tenant; let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    (tenant:$t,member:$i) isa membership;
+  return check;
+fun scope_principal($tenant: string, $actor: string, $now: datetime, $p: principal) -> boolean:
+  match { $p isa identity; let $identity_allowed=scope_identity($tenant,$actor,$now,$p); $identity_allowed==true; }
+    or { $p isa team; let $team_allowed=scope_team($tenant,$actor,$now,$p); $team_allowed==true; };
+  return check;
+fun scope_resource($tenant: string, $actor: string, $now: datetime, $r: resource) -> boolean:
+  match $t isa tenant; let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    (tenant:$t,resource:$r) isa resource_ownership;
+  return check;
+fun read_resource($tenant: string, $actor: string, $now: datetime, $r: resource) -> boolean:
+  match $t isa tenant; let $scoped=scope_tenant($tenant,$actor,$now,$t); $scoped==true;
+    let $owned=scope_resource($tenant,$actor,$now,$r); $owned==true;
+    $i isa person, has identity_id == $actor;
+    { let $admin_allowed=can_manage_access($i,$t,$now); $admin_allowed==true; }
+    or { let $permission_allowed=is_permitted($i,$t,$r,"read",$now); $permission_allowed==true; };
+  return check;
+fun request_permitted($tenant: string, $actor: string, $now: datetime, $r: resource, $action: string) -> boolean @meta("dog.security.context", "true"):
+  match $t isa tenant; let $scoped=scope_tenant($tenant,$actor,$now,$t); $scoped==true;
+    $i isa person, has identity_id == $actor;
+    let $ok=is_permitted($i,$t,$r,$action,$now); $ok==true;
+  return check;
+fun scope_team($tenant: string, $actor: string, $now: datetime, $team: team) -> boolean:
+  match $t isa tenant; let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    (tenant:$t,team:$team) isa team_ownership;
+  return check;
+fun scope_policy($tenant: string, $actor: string, $now: datetime, $p: access_policy) -> boolean:
+  match $t isa tenant; let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    (tenant:$t,policy:$p) isa policy_ownership;
+  return check;
+fun scope_version($tenant: string, $actor: string, $now: datetime, $v: policy_revision) -> boolean:
+  match $p isa access_policy; (policy:$p,version:$v) isa policy_version;
+    let $ok=scope_policy($tenant,$actor,$now,$p); $ok==true;
+  return check;
+fun scope_resource_owner($tenant: string, $actor: string, $now: datetime, $o: resource_ownership) -> boolean:
+  match $o links(tenant:$t,resource:$r); $t isa tenant; $r isa resource;
+    let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    let $read=read_resource($tenant,$actor,$now,$r); $read==true;
+  return check;
+fun scope_team_owner($tenant: string, $actor: string, $now: datetime, $o: team_ownership) -> boolean:
+  match $o links(tenant:$t,team:$team); $t isa tenant; $team isa team;
+    let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+  return check;
+fun scope_policy_owner($tenant: string, $actor: string, $now: datetime, $o: policy_ownership) -> boolean:
+  match $o links(tenant:$t,policy:$p); $t isa tenant; $p isa access_policy;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+  return check;
+fun scope_policy_version($tenant: string, $actor: string, $now: datetime, $o: policy_version) -> boolean:
+  match $o links(policy:$p,version:$v); $p isa access_policy; $v isa policy_revision;
+    let $ok=scope_policy($tenant,$actor,$now,$p); $ok==true;
+  return check;
+fun scope_policy_scope($tenant: string, $actor: string, $now: datetime, $o: policy_scope) -> boolean:
+  match $o links(version:$v,resource:$r); $v isa policy_revision; $r isa resource;
+    let $ok=scope_version($tenant,$actor,$now,$v); $ok==true;
+    let $owned=scope_resource($tenant,$actor,$now,$r); $owned==true;
+  return check;
+fun scope_grant($tenant: string, $actor: string, $now: datetime, $g: access_grant) -> boolean:
+  match $g links(tenant:$t,resource:$r); $t isa tenant; $r isa resource;
+    let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    let $owned=scope_resource($tenant,$actor,$now,$r); $owned==true;
+  return check;
+fun read_grant($tenant: string, $actor: string, $now: datetime, $g: access_grant) -> boolean:
+  match let $scoped=scope_grant($tenant,$actor,$now,$g); $scoped==true;
+    $g links(tenant:$t); $t isa tenant;
+    $i isa person, has identity_id == $actor;
+    { let $admin_allowed=request_manage($tenant,$actor,$now,$t); $admin_allowed==true; }
+    or { $g links(grantee:$i); }
+    or { $g links(grantee:$team); $team isa team;
+      let $team_allowed=active_team_member($i,$t,$team,$now); $team_allowed==true; };
+  return check;
+fun scope_review($tenant: string, $actor: string, $now: datetime, $review: access_review) -> boolean:
+  match $review links(grant:$g); $g isa access_grant, links(tenant:$t); $t isa tenant;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $scoped=scope_grant($tenant,$actor,$now,$g); $scoped==true;
+  return check;
+fun create_resource($tenant: string, $actor: string, $now: datetime, $r: resource) -> boolean:
+  match $t isa tenant; (tenant:$t,resource:$r) isa resource_ownership;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    $r has name $name, has resource_id $id;
+  return check;
+fun create_team($tenant: string, $actor: string, $now: datetime, $team: team) -> boolean:
+  match $t isa tenant; (tenant:$t,team:$team) isa team_ownership;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    $team has name $name;
+  return check;
+fun create_policy($tenant: string, $actor: string, $now: datetime, $p: access_policy) -> boolean:
+  match let $ok=scope_policy($tenant,$actor,$now,$p); $ok==true;
+    $p has name $name;
+  return check;
+fun create_version($tenant: string, $actor: string, $now: datetime, $v: policy_revision) -> boolean:
+  match let $ok=scope_version($tenant,$actor,$now,$v); $ok==true;
+    $v has description $description;
+  return check;
+fun create_resource_owner($tenant: string, $actor: string, $now: datetime, $o: resource_ownership) -> boolean:
+  match $o links(tenant:$t,resource:$r); $t isa tenant; $r isa resource;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $valid=create_resource($tenant,$actor,$now,$r); $valid==true;
+  return check;
+fun create_team_owner($tenant: string, $actor: string, $now: datetime, $o: team_ownership) -> boolean:
+  match $o links(tenant:$t,team:$team); $t isa tenant; $team isa team;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $valid=create_team($tenant,$actor,$now,$team); $valid==true;
+  return check;
+fun create_policy_owner($tenant: string, $actor: string, $now: datetime, $o: policy_ownership) -> boolean:
+  match $o links(tenant:$t,policy:$p); $t isa tenant; $p isa access_policy;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $valid=create_policy($tenant,$actor,$now,$p); $valid==true;
+  return check;
+fun create_policy_version($tenant: string, $actor: string, $now: datetime, $o: policy_version) -> boolean:
+  match let $ok=scope_policy_version($tenant,$actor,$now,$o); $ok==true;
+  return check;
+fun create_policy_scope($tenant: string, $actor: string, $now: datetime, $o: policy_scope) -> boolean:
+  match let $ok=scope_policy_scope($tenant,$actor,$now,$o); $ok==true;
+  return check;
+fun update_tenant_revision($tenant: string, $actor: string, $now: datetime, $t: tenant, $revision: string) -> boolean:
+  match let $ok=request_manage($tenant,$actor,$now,$t); $ok==true; $revision != "";
+  return check;
+fun create_exception_grant($tenant: string, $actor: string, $now: datetime, $g: exception_access_grant) -> boolean:
+  match $g links(tenant:$t,grantee:$target,grantor:$by,resource:$r); $t isa tenant; $target isa principal; $by isa identity, has identity_id == $actor; $r isa resource;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $owned=scope_resource($tenant,$actor,$now,$r); $owned==true;
+    let $eligible=grantee_in_tenant($target,$t,$now); $eligible==true;
+    $g has start_at $start, has end_at $end, has reason $reason;
+    $start < $end;
+  return check;
+fun create_policy_grant($tenant: string, $actor: string, $now: datetime, $g: policy_access_grant) -> boolean:
+  match $g links(tenant:$t,grantee:$target,grantor:$by,resource:$r,policy_version:$v), has effect "allow", has permission_level $level;
+    $t isa tenant; $target isa identity; $by isa identity, has identity_id == $actor; $r isa resource; $v isa policy_revision, has required_role $role;
+    let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $owned=scope_resource($tenant,$actor,$now,$r); $owned==true;
+    let $version=scope_version($tenant,$actor,$now,$v); $version==true;
+    let $required=$role; let $eligible=role_at_least($target,$t,$required,$now); $eligible==true;
+    (version:$v,resource:$r) isa policy_scope, has $level;
+    not { $g has end_at $end, has start_at $start; $end <= $start; };
+  return check;
+fun create_review($tenant: string, $actor: string, $now: datetime, $review: access_review) -> boolean:
+  match $review links(grant:$g,reviewer:$by), has reviewed_at $time, has reason $reason;
+    $g isa access_grant, links(tenant:$t); $t isa tenant; $by isa identity, has identity_id == $actor;
+    let $scoped=scope_grant($tenant,$actor,$now,$g); $scoped==true;
+    let $ok=can_review_grant($by,$t,$g,$now); $ok==true;
+    $time <= $now;
+  return check;
+
+# Frontend-callable domain functions receive server-owned context automatically.
+# They are schema code, not registered query strings or application handlers.
+fun request_paths($tenant: string, $actor: string, $now: datetime, $r: resource, $action: string) -> {access_grant,string} @meta("dog.security.context", "true"):
+  match $t isa tenant; let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    $i isa person, has identity_id == $actor;
+    let $g,$source in matching_access_paths($i,$t,$r,$action,$now);
+  return {$g,$source};
+fun request_missing($tenant: string, $actor: string, $now: datetime, $t: tenant) -> {identity,resource,string} @meta("dog.security.context", "true"):
+  match let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $i,$r,$action in missing_policy_access($t,$now);
+  return {$i,$r,$action};
+fun request_excess($tenant: string, $actor: string, $now: datetime, $t: tenant) -> {identity,access_grant} @meta("dog.security.context", "true"):
+  match let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $i,$g in excess_policy_access($t,$now);
+  return {$i,$g};
+fun request_unreviewed($tenant: string, $actor: string, $now: datetime, $t: tenant) -> {access_grant} @meta("dog.security.context", "true"):
+  match let $ok=request_manage($tenant,$actor,$now,$t); $ok==true;
+    let $g in unreviewed_grants($t);
+  return {$g};
+fun request_grantee($tenant: string, $actor: string, $now: datetime, $target: principal) -> boolean @meta("dog.security.context", "true"):
+  match $t isa tenant; let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    let $eligible=grantee_in_tenant($target,$t,$now); $eligible==true;
+  return check;
+fun request_role($tenant: string, $actor: string, $now: datetime, $target: identity, $role: string) -> boolean @meta("dog.security.context", "true"):
+  match $t isa tenant; let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    let $eligible=role_at_least($target,$t,$role,$now); $eligible==true;
+  return check;
+fun request_reviewable($tenant: string, $actor: string, $now: datetime, $g: access_grant) -> boolean @meta("dog.security.context", "true"):
+  match $t isa tenant; let $ok=scope_tenant($tenant,$actor,$now,$t); $ok==true;
+    $i isa person, has identity_id == $actor;
+    let $review=can_review_grant($i,$t,$g,$now); $review==true;
+  return check;

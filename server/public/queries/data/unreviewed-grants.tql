@@ -1,0 +1,7 @@
+match
+$actor isa person, has identity_id @@identity_id@@;
+$t isa tenant, has tenant_id @@tenant_id@@;
+let $now=request_now();
+let $admin=request_manage($t); $admin==true;
+let $g in request_unreviewed($t);
+fetch { "grant_id":$g.grant_id,"permission":$g.permission_level,"effect":$g.effect };
