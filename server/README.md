@@ -97,6 +97,17 @@ Mercury sandbox access currently has an external IP-allowlist restriction.
 
 ### Verification evidence — October 20, 2026
 
+The 0.3.4 follow-up reproduces absent-policy deletion as HTTP 500 on the old
+dependency and verifies HTTP 403, client redaction and unchanged persisted state
+on the published fix. All four real backend tests, default tests, Clippy and
+frontend tests pass with the published dependency and no local override. Real
+Stripe test-mode HTTP acceptance covers authenticated customer CRUD/idempotency,
+unconfirmed intent cancellation, Checkout expiration and draft invoice/item
+reads with synthetic cleanup. No payment is confirmed or email sent. Mercury's
+direct sandbox baseline still returns HTTP 401 with an IP restriction; do not
+describe that as passing provider acceptance. See `tests/README.md` to rerun the
+explicit provider checks.
+
 All-target debug builds, release builds of both executables, formatting and
 Clippy with warnings denied pass. The final published-0.3.3 dependency run passed
 29 library tests, two layout tests, all four real TypeDB backend tests,

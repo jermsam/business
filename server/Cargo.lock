@@ -632,9 +632,9 @@ dependencies = [
 
 [[package]]
 name = "dog-typedb"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e23df28e6432ca54a78a98fc104869aa2110ae80ca6a5dc6d15013d6114b9db"
+checksum = "77bde662a4ed64a4901ce32c7fb3f630e2e52c2257ea696280f016e0c2fdee94"
 dependencies = [
  "anyhow",
  "async-trait",

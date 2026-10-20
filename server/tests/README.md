@@ -23,3 +23,20 @@ the same cluster. Tests create only generated disposable databases and never res
 configured databases. Provider checks must be selected separately; never run all
 ignored tests with production credentials. A provider proxy test is not evidence
 that recurring billing, onboarding, recovery or fulfillment workflows exist.
+
+## Real-provider HTTP acceptance
+
+`tests/acceptance/provider-http.mjs` exercises the deployed validation service or
+an explicit loopback instance, using real owner login, tenant hooks and provider
+HTTP. Supply `BUSINESS_TEST_BASE_URL`, `BUSINESS_TEST_TENANT`,
+`BUSINESS_TEST_OWNER_EMAIL`, `BUSINESS_TEST_OWNER_PASSWORD` from a private
+environment, and select `BUSINESS_TEST_PROVIDER=stripe` or `mercury`.
+
+Stripe additionally requires `BUSINESS_ALLOW_PROVIDER_TEST_WRITES=1` and an
+explicitly registered TEST connection. It verifies synthetic customer CRUD and
+idempotency, unconfirmed setup/payment-intent cancellation, Checkout expiration,
+draft invoice/item reads, cleanup, tenant denial and logout. It never confirms a
+payment, finalizes an invoice or sends email. Mercury performs read-only checks of
+all four resources and fails if upstream access is denied; an allowlist failure is
+not reported as a passing end-to-end test. No provider token is sent by this test
+client or printed in its output.

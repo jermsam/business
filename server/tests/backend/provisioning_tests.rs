@@ -103,6 +103,21 @@ async fn canonical_tools_and_server_end_to_end() -> Result<()> {
         let read=||client.post(format!("{base}/data")).header("x-gateway-secret",gateway).header("x-tenant-id",tenant).header("x-service-method","read").bearer_auth(token).json(&json!({"query":"match $r isa resource; fetch {'id':$r.resource_id};"}));
         let rows:Value=read().send().await?.error_for_status()?.json().await?;
         ensure!(rows["ok"]["answers"].as_array().is_some_and(|a|a.len()==1),"Canonical resource read failed");
+        // No delete annotation is a deny-by-default decision, not an internal
+        // server failure. Exercise the actual HTTP transport and verify no write.
+        for query in [
+            "match $r isa resource,has resource_id 'tool-resource'; delete $r;",
+            "match $r isa resource,has resource_id 'tool-resource'; delete $r; fetch {'deleted':true};",
+        ] {
+            let denied=client.post(format!("{base}/data")).header("x-gateway-secret",gateway)
+                .header("x-tenant-id",tenant).header("x-service-method","write")
+                .bearer_auth(token).json(&json!({"query":query})).send().await?;
+            ensure!(denied.status()==403,"Missing deletion policy did not return HTTP 403");
+            let body:Value=denied.json().await?;
+            ensure!(body["name"]=="Forbidden"&&body.get("source").is_none(),"Unsafe policy denial response");
+            let retained:Value=read().send().await?.error_for_status()?.json().await?;
+            ensure!(retained["ok"]["answers"].as_array().is_some_and(|a|a.len()==1),"Denied deletion changed persisted state");
+        }
         let logged_out=client.delete(format!("{base}/authentication")).header("x-gateway-secret",gateway).header("x-tenant-id",tenant).bearer_auth(token).send().await?;
         ensure!(logged_out.status().is_success(),"Logout failed");
         ensure!(read().send().await?.status()==401,"Logged-out access token still works");

@@ -14,7 +14,7 @@ dog-auth = "=0.3.1"
 dog-auth-local = "0.3.0"
 dog-transport = { version = "0.3.0", features = ["http"] }
 dog-core = { version = "0.3.0", features = ["serde", "adapters"] }
-dog-typedb = "=0.3.3"
+dog-typedb = "=0.3.4"
 dotenvy = "0.15.7"
 futures = "0.3.32"
 serde = { version = "1.0.228", features = ["derive"] }
