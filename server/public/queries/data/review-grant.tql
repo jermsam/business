@@ -1,0 +1,13 @@
+match
+$actor isa person, has identity_id @@identity_id@@;
+$t isa tenant, has tenant_id @@tenant_id@@;
+let $now=request_now();
+$g isa access_grant,has grant_id @@grant_id@@;
+let $reviewable=request_reviewable($g);$reviewable==true;
+{ $existing isa access_review,has review_id @@review_id@@,has reviewed_at $recorded; let $timestamp=$recorded; }
+or { not {$existing_other isa access_review,has review_id @@review_id@@;}; let $timestamp=$now; };
+select $t,$actor,$g,$timestamp; distinct;
+put $review isa access_review,links(grant:$g,reviewer:$actor),
+has review_id @@review_id@@,has reviewed_at == $timestamp,has review_outcome @@outcome@@,has reason @@reason@@;
+update $t has revision @@revision@@;
+fetch { "review_id":$review.review_id,"grant_id":$g.grant_id,"outcome":$review.review_outcome };

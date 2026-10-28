@@ -1,0 +1,140 @@
+define
+# Billing uses the same person/tenant model as IAM. Provider state is private:
+# frontend queries cannot manufacture payments, saved cards or consent evidence.
+attribute bill_key, value string;
+attribute bill_email, value string;
+attribute bill_policy, value string @values("customer", "manual", "automatic");
+attribute bill_choice, value string @values("manual", "automatic");
+attribute bill_provider, value string @values("mercury", "stripe");
+attribute bill_status, value string;
+attribute bill_amount, value integer @range(50..99999999);
+attribute bill_due_days, value integer @range(0..90);
+attribute bill_anchor, value integer;
+attribute bill_next, value integer;
+attribute bill_sequence, value integer @range(0..);
+attribute bill_interval, value string @values("once", "week", "month", "year");
+attribute bill_stripe_id @meta("dog.security.hidden", "true"), value string;
+attribute bill_mercury_id @meta("dog.security.hidden", "true"), value string;
+attribute bill_payment_method @meta("dog.security.hidden", "true"), value string;
+attribute bill_consent @meta("dog.security.hidden", "true"), value string;
+attribute bill_external_id @meta("dog.security.hidden", "true"), value string;
+attribute bill_removed_method @meta("dog.security.hidden", "true"), value string;
+attribute bill_url, value string;
+attribute bill_updated, value integer;
+attribute bill_revision, value string;
+attribute bill_history @meta("dog.security.hidden", "true"), value string;
+entity bill_customer,
+  owns bill_key @key, owns name @card(1), owns bill_email @card(1),
+  owns bill_policy @card(1), owns bill_choice @card(1), owns bill_provider @card(1),
+  owns bill_stripe_id @card(1), owns bill_mercury_id @card(1),
+  owns bill_payment_method @card(1), owns bill_consent @card(1), owns bill_revision @card(1),
+  owns bill_removed_method @card(0..);
+relation bill_account, relates merchant @card(1), relates buyer @card(1), relates customer @card(1);
+tenant plays bill_account:merchant, plays bill_account:buyer;
+bill_customer plays bill_account:customer @card(1);
+entity bill_plan,
+  owns bill_key @key, owns name @card(1), owns bill_amount @card(1), owns bill_due_days @card(1),
+  owns bill_anchor @card(1), owns bill_next @card(1), owns bill_sequence @card(1),
+  owns bill_interval @card(1), owns bill_status @card(1);
+relation bill_plan_owner, relates customer @card(1), relates plan @card(1);
+bill_customer plays bill_plan_owner:customer;
+bill_plan plays bill_plan_owner:plan @card(1);
+entity bill_invoice,
+  owns bill_key @key, owns name @card(1), owns bill_amount @card(1), owns bill_anchor @card(1),
+  owns bill_next @card(1), owns bill_sequence @card(1), owns bill_choice @card(1),
+  owns bill_provider @card(1), owns bill_status @card(1), owns bill_external_id @card(1),
+  owns bill_url @card(1), owns bill_updated @card(1), owns bill_revision @card(1),
+  owns bill_history @card(0..1);
+relation bill_invoice_owner, relates plan @card(1), relates invoice @card(1);
+bill_plan plays bill_invoice_owner:plan;
+bill_invoice plays bill_invoice_owner:invoice @card(1);
+entity bill_notice, owns bill_key @key, owns bill_status @card(1), owns bill_updated @card(1);
+relation bill_notice_owner, relates invoice @card(1), relates notice @card(1);
+bill_invoice plays bill_notice_owner:invoice;
+bill_notice plays bill_notice_owner:notice @card(1);
+entity bill_consent_evidence, owns bill_key @key, owns bill_revision @card(1), owns bill_updated @card(1);
+relation bill_consent_owner, relates customer @card(1), relates actor @card(1), relates evidence @card(1);
+bill_customer plays bill_consent_owner:customer;
+identity plays bill_consent_owner:actor;
+bill_consent_evidence plays bill_consent_owner:evidence @card(1);
+
+fun bill_seller($i: identity, $t: tenant, $c: bill_customer, $now: datetime) -> boolean:
+  match (merchant:$t,customer:$c) isa bill_account;
+    let $ok=role_at_least($i,$t,"owner",$now); $ok==true;
+  return check;
+fun bill_buyer($i: identity, $t: tenant, $c: bill_customer, $now: datetime) -> boolean:
+  match (buyer:$t,customer:$c) isa bill_account;
+    let $ok=role_at_least($i,$t,"owner",$now); $ok==true;
+  return check;
+fun bill_reader($i: identity, $t: tenant, $c: bill_customer, $now: datetime) -> boolean:
+  match { let $seller=bill_seller($i,$t,$c,$now); $seller==true; }
+    or { let $buyer=bill_buyer($i,$t,$c,$now); $buyer==true; };
+  return check;
+fun scope_bill_customer($tenant: string, $actor: string, $now: datetime, $c: bill_customer) -> boolean:
+  match $t isa tenant, has tenant_id == $tenant;
+    $i isa person, has identity_id == $actor;
+    let $ok=bill_reader($i,$t,$c,$now); $ok==true;
+  return check;
+fun scope_bill_plan($tenant: string, $actor: string, $now: datetime, $p: bill_plan) -> boolean:
+  match (customer:$c,plan:$p) isa bill_plan_owner; $c isa bill_customer;
+    let $ok=scope_bill_customer($tenant,$actor,$now,$c); $ok==true;
+  return check;
+fun scope_bill_invoice($tenant: string, $actor: string, $now: datetime, $i: bill_invoice) -> boolean:
+  match (plan:$p,invoice:$i) isa bill_invoice_owner; $p isa bill_plan;
+    let $ok=scope_bill_plan($tenant,$actor,$now,$p); $ok==true;
+  return check;
+fun scope_bill_plan_owner($tenant: string, $actor: string, $now: datetime, $o: bill_plan_owner) -> boolean:
+  match $o links(customer:$c,plan:$p); $c isa bill_customer; $p isa bill_plan;
+    let $ok=scope_bill_customer($tenant,$actor,$now,$c); $ok==true;
+  return check;
+fun scope_bill_invoice_owner($tenant: string, $actor: string, $now: datetime, $o: bill_invoice_owner) -> boolean:
+  match $o links(plan:$p,invoice:$i); $p isa bill_plan; $i isa bill_invoice;
+    let $ok=scope_bill_plan($tenant,$actor,$now,$p); $ok==true;
+  return check;
+fun bill_unconsented($c: bill_customer) -> boolean:
+  match $c has bill_consent $consent, has bill_revision $revision; $consent!=$revision;
+  return check;
+fun update_bill_revision($tenant: string, $actor: string, $now: datetime, $c: bill_customer, $next: string) -> boolean:
+  match let $ok=scope_bill_customer($tenant,$actor,$now,$c); $ok==true;
+    $c has bill_revision $old, has bill_consent $consent;
+    $next!=$old; $next!=$consent; $next!="";
+  return check;
+fun update_bill_policy($tenant: string, $actor: string, $now: datetime, $c: bill_customer, $policy: string) -> boolean:
+  match $t isa tenant, has tenant_id == $tenant; $i isa person, has identity_id == $actor;
+    let $ok=bill_seller($i,$t,$c,$now); $ok==true;
+    let $safe=bill_unconsented($c); $safe==true;
+    { $policy=="customer"; } or { $policy=="manual"; } or { $policy=="automatic"; };
+  return check;
+fun update_bill_choice($tenant: string, $actor: string, $now: datetime, $c: bill_customer, $choice: string) -> boolean:
+  match $t isa tenant, has tenant_id == $tenant; $i isa person, has identity_id == $actor;
+    let $ok=bill_buyer($i,$t,$c,$now); $ok==true; $choice=="manual";
+  return check;
+fun create_bill_plan($tenant: string, $actor: string, $now: datetime, $p: bill_plan) -> boolean:
+  match (customer:$c,plan:$p) isa bill_plan_owner; $c isa bill_customer;
+    $t isa tenant, has tenant_id == $tenant; $i isa person, has identity_id == $actor;
+    let $owner=bill_seller($i,$t,$c,$now); $owner==true;
+    let $safe=bill_unconsented($c); $safe==true;
+    $p has bill_status "active", has bill_sequence 0, has bill_anchor $anchor, has bill_next == $anchor;
+  return check;
+fun create_bill_plan_owner($tenant: string, $actor: string, $now: datetime, $o: bill_plan_owner) -> boolean:
+  match $o links(plan:$p); $p isa bill_plan;
+    let $ok=create_bill_plan($tenant,$actor,$now,$p); $ok==true;
+  return check;
+fun update_bill_plan_status($tenant: string, $actor: string, $now: datetime, $p: bill_plan, $next: string) -> boolean:
+  match (customer:$c,plan:$p) isa bill_plan_owner; $c isa bill_customer;
+    $t isa tenant, has tenant_id == $tenant; $i isa person, has identity_id == $actor;
+    let $owner=bill_seller($i,$t,$c,$now); $owner==true;
+    let $safe=bill_unconsented($c); $safe==true;
+    $p has bill_status $old; $old!="finished";
+    { $next=="active"; } or { $next=="paused"; };
+  return check;
+
+entity bill_customer @meta("dog.security.scope", "scope_bill_customer") @meta("dog.security.read", "scope_bill_customer"),
+  owns bill_revision @meta("dog.security.update", "update_bill_revision"),
+  owns bill_policy @meta("dog.security.update", "update_bill_policy"),
+  owns bill_choice @meta("dog.security.update", "update_bill_choice");
+entity bill_plan @meta("dog.security.scope", "scope_bill_plan") @meta("dog.security.read", "scope_bill_plan") @meta("dog.security.create", "create_bill_plan"),
+  owns bill_status @meta("dog.security.update", "update_bill_plan_status");
+entity bill_invoice @meta("dog.security.scope", "scope_bill_invoice") @meta("dog.security.read", "scope_bill_invoice");
+relation bill_plan_owner @meta("dog.security.scope", "scope_bill_plan_owner") @meta("dog.security.read", "scope_bill_plan_owner") @meta("dog.security.create", "create_bill_plan_owner");
+relation bill_invoice_owner @meta("dog.security.scope", "scope_bill_invoice_owner") @meta("dog.security.read", "scope_bill_invoice_owner");

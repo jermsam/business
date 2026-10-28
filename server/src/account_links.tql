@@ -1,0 +1,10 @@
+define
+attribute link_kind, value string @values("invite", "reset");
+attribute link_expires, value integer;
+attribute link_used, value boolean;
+attribute link_target, value string;
+attribute link_version, value string;
+# Server-owned one-use credentials; never exposed through public data policies.
+entity account_link, owns token_key @key, owns email @card(1),
+ owns link_kind @card(1), owns link_expires @card(1), owns link_used @card(1),
+ owns link_target @card(1), owns link_version @card(1);

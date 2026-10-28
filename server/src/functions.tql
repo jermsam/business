@@ -1,0 +1,161 @@
+define
+fun active_member($i: identity, $t: tenant, $now: datetime) -> boolean:
+  match
+    $i has status "active"; $t has status "active";
+    $m isa membership, links (tenant: $t, member: $i), has start_at $start;
+    $start <= $now;
+    { not { $m has end_at $_; }; } or { $m has end_at $end; $now < $end; };
+  return check;
+
+fun role_at_least($i: identity, $t: tenant, $required: string, $now: datetime) -> boolean:
+  match
+    let $active = active_member($i, $t, $now); $active == true;
+    $m isa membership, links (tenant: $t, member: $i), has membership_role $role, has start_at $start;
+    $start <= $now;
+    { not { $m has end_at $_; }; } or { $m has end_at $end; $now < $end; };
+    { $required == "member"; }
+    or { $required == "admin"; { $role == "admin"; } or { $role == "owner"; }; }
+    or { $required == "owner"; $role == "owner"; };
+  return check;
+
+fun active_team_member($i: identity, $t: tenant, $team: team, $now: datetime) -> boolean:
+  match
+    let $active = active_member($i, $t, $now); $active == true;
+    (tenant: $t, team: $team) isa team_ownership;
+    $m isa team_membership, links (team: $team, member: $i), has start_at $start;
+    $start <= $now;
+    { not { $m has end_at $_; }; } or { $m has end_at $end; $now < $end; };
+  return check;
+
+fun grantee_in_tenant($p: principal, $t: tenant, $now: datetime) -> boolean:
+  match
+    { $p isa identity; let $member=active_member($p,$t,$now); $member==true; }
+    or { $p isa team; (tenant:$t,team:$p) isa team_ownership; };
+  return check;
+
+fun valid_access_window($start: datetime, $end: datetime) -> boolean:
+  match $start < $end;
+  return check;
+
+fun permission_covers($held: string, $requested: string) -> boolean:
+  match
+    { $requested == "read"; { $held == "read"; } or { $held == "write"; } or { $held == "admin"; }; }
+    or { $requested == "write"; { $held == "write"; } or { $held == "admin"; }; }
+    or { $requested == "admin"; $held == "admin"; };
+  return check;
+
+fun live_grant($g: access_grant, $now: datetime) -> boolean:
+  match
+    $g has start_at $start; $start <= $now;
+    { not { $g has end_at $_; }; } or { $g has end_at $end; $now < $end; };
+    not {
+      $review isa access_review, links (grant: $g),
+        has review_outcome "revoked", has reviewed_at $reviewed;
+      $reviewed <= $now;
+    };
+  return check;
+
+fun grant_policy_satisfied($i: identity, $t: tenant, $g: access_grant, $now: datetime) -> boolean:
+  match
+    { $g isa exception_access_grant, has reason $_; }
+    or {
+      $g isa policy_access_grant, links (policy_version: $version);
+      $version isa policy_revision, has required_role $required;
+      let $role = $required;
+      $g links (resource: $resource), has permission_level $permission;
+      (version: $version, resource: $resource) isa policy_scope, has $permission;
+      $policy isa access_policy, has status "active";
+      (policy: $policy, version: $version) isa policy_version;
+      (tenant: $t, policy: $policy) isa policy_ownership;
+      let $eligible = role_at_least($i, $t, $role, $now); $eligible == true;
+    };
+  return check;
+
+# Returns both the accountable grant and the path explaining access.
+fun matching_access_paths($i: identity, $t: tenant, $r: resource, $action: string, $now: datetime) -> { access_grant, string }:
+  match
+    let $active = active_member($i, $t, $now); $active == true;
+    $r has status "active";
+    (tenant: $t, resource: $r) isa resource_ownership;
+    $g isa access_grant, links (tenant: $t, resource: $r), has permission_level $permission;
+    let $held = $permission;
+    let $covers = permission_covers($held, $action); $covers == true;
+    let $live = live_grant($g, $now); $live == true;
+    let $eligible = grant_policy_satisfied($i, $t, $g, $now); $eligible == true;
+    { $g links (grantee: $i); let $source = "direct"; }
+    or {
+      $g links (grantee: $team); $team isa team;
+      let $team_active = active_team_member($i, $t, $team, $now); $team_active == true;
+      let $source = "team";
+    };
+  return { $g, $source };
+
+fun has_effect($i: identity, $t: tenant, $r: resource, $action: string, $effect: string, $now: datetime) -> boolean:
+  match
+    let $g, $source in matching_access_paths($i, $t, $r, $action, $now);
+    $g has effect == $effect;
+  return check;
+
+fun is_permitted($i: identity, $t: tenant, $r: resource, $action: string, $now: datetime) -> boolean:
+  match
+    let $allowed = has_effect($i, $t, $r, $action, "allow", $now); $allowed == true;
+    let $denied = has_effect($i, $t, $r, $action, "deny", $now); $denied == false;
+  return check;
+
+fun can_manage_access($i: identity, $t: tenant, $now: datetime) -> boolean:
+  match let $admin = role_at_least($i, $t, "admin", $now); $admin == true;
+  return check;
+
+fun can_review_grant($i: identity, $t: tenant, $g: access_grant, $now: datetime) -> boolean:
+  match
+    let $admin = can_manage_access($i, $t, $now); $admin == true;
+    $g links (tenant: $t, grantor: $grantor);
+    not { $i is $grantor; };
+    not { $g links (grantee: $i); };
+  return check;
+
+fun self_review_violations() -> { access_review }:
+  match
+    $review isa access_review, links (grant: $grant, reviewer: $reviewer);
+    { $grant links (grantor: $reviewer); } or { $grant links (grantee: $reviewer); };
+  return { $review };
+
+fun unreviewed_grants($t: tenant) -> { access_grant }:
+  match
+    $g isa access_grant, links (tenant: $t);
+    not { $_ isa access_review, links (grant: $g); };
+  return { $g };
+
+fun expected_policy_access($t: tenant, $now: datetime) -> { identity, resource, string }:
+  match
+    $policy isa access_policy, has status "active";
+    (tenant: $t, policy: $policy) isa policy_ownership;
+    (policy: $policy, version: $version) isa policy_version;
+    $version has required_role $required;
+    let $role = $required;
+    (version: $version, resource: $resource) isa policy_scope, has permission_level $level;
+    let $action = $level;
+    (tenant: $t, resource: $resource) isa resource_ownership;
+    $resource has status "active";
+    $i isa identity;
+    let $eligible = role_at_least($i, $t, $role, $now); $eligible == true;
+  return { $i, $resource, $action };
+
+fun missing_policy_access($t: tenant, $now: datetime) -> { identity, resource, string }:
+  match
+    let $i, $r, $action in expected_policy_access($t, $now);
+    let $permitted = is_permitted($i, $t, $r, $action, $now); $permitted == false;
+  return { $i, $r, $action };
+
+fun excess_policy_access($t: tenant, $now: datetime) -> { identity, access_grant }:
+  match
+    $g isa policy_access_grant, links (tenant: $t), has effect "allow";
+    let $live = live_grant($g, $now); $live == true;
+    { $g links (grantee: $i); $i isa identity; }
+    or {
+      $g links (grantee: $team); $team isa team;
+      $i isa identity;
+      let $team_active = active_team_member($i, $t, $team, $now); $team_active == true;
+    };
+    let $eligible = grant_policy_satisfied($i, $t, $g, $now); $eligible == false;
+  return { $i, $g };

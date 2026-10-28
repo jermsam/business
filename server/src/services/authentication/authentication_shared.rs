@@ -2,14 +2,14 @@ use std::sync::Arc;
 
 use crate::services::BusinessParams;
 pub fn register_hooks(
-    app: &dog_core::DogApp<serde_json::Value, BusinessParams>,
+    app: &mut dog_core::DogAppBuilder<serde_json::Value, BusinessParams>,
 ) -> anyhow::Result<()> {
-    app.service("authentication")?.hooks(|h| {
-        h.before_create(Arc::new(super::authentication_service_hooks::LogAuthCreate));
+    app.service_hooks("authentication", |h| {
+        h.before_create(Arc::new(super::authentication_hooks::LogAuthCreate));
         h.after_create(Arc::new(
-            super::authentication_service_hooks::StripPasswordFromAuthResult,
+            super::authentication_hooks::StripPasswordFromAuthResult,
         ));
-        h.before_remove(Arc::new(super::authentication_service_hooks::LogAuthRemove));
+        h.before_remove(Arc::new(super::authentication_hooks::LogAuthRemove));
     });
     Ok(())
 }

@@ -1,0 +1,3 @@
+match $i isa bill_invoice; (plan:$p,invoice:$i) isa bill_invoice_owner;
+  $p isa bill_plan; (customer:$c,plan:$p) isa bill_plan_owner; $c isa bill_customer;
+fetch {"id":$i.bill_key,"customer_id":$c.bill_key,"description":$i.name,"amount_cents":$i.bill_amount,"issued_at":$i.bill_anchor,"due_at":$i.bill_next,"status":$i.bill_status,"mode":$i.bill_choice,"provider":$i.bill_provider,"payment_url":$i.bill_url};

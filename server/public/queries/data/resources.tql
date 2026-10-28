@@ -1,0 +1,9 @@
+match
+$actor isa person, has identity_id @@identity_id@@;
+$t isa tenant, has tenant_id @@tenant_id@@;
+let $now=request_now();
+$r isa resource;
+let $allowed = request_permitted($r,"read"); $allowed == true;
+$r has resource_id $id, has name $name;
+select $id,$name; distinct; sort $id; limit 100;
+fetch { "id":$id,"name":$name };

@@ -1,0 +1,10 @@
+match
+$actor isa person,has identity_id @@identity_id@@;
+$t isa tenant,has tenant_id @@tenant_id@@;
+let $now=request_now();
+let $admin=request_manage($t);$admin==true;
+select $t;distinct;
+put $r isa resource,has resource_id @@resource_id@@,has name @@name@@,has status "active";
+(tenant:$t,resource:$r) isa resource_ownership;
+update $t has revision @@revision@@;
+fetch {"id":$r.resource_id,"name":$r.name};

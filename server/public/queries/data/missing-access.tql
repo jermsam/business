@@ -1,0 +1,7 @@
+match
+$actor isa person, has identity_id @@identity_id@@;
+$t isa tenant, has tenant_id @@tenant_id@@;
+let $now=request_now();
+let $admin=request_manage($t); $admin==true;
+let $i,$r,$action in request_missing($t);
+fetch { "identity_id":$i.identity_id,"resource_id":$r.resource_id,"permission":$action };

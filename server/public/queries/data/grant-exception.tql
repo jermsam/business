@@ -1,0 +1,18 @@
+match
+$actor isa person,has identity_id @@identity_id@@;
+$t isa tenant,has tenant_id @@tenant_id@@;
+let $now=request_now();
+let $admin=request_manage($t);$admin==true;
+$target isa principal;
+{ $target isa identity,has identity_id @@target_id@@; }
+or { $target isa team,has team_id @@target_id@@; };
+let $in_tenant=request_grantee($target);$in_tenant==true;
+$r isa resource,has resource_id @@resource_id@@,has status "active";
+(tenant:$t,resource:$r) isa resource_ownership;
+let $window=valid_access_window(@@starts_at@@,@@ends_at@@);$window==true;
+select $t,$actor,$target,$r;distinct;
+put $g isa exception_access_grant,links(tenant:$t,grantee:$target,resource:$r,grantor:$actor),
+has grant_id @@grant_id@@,has permission_level @@permission@@,has effect @@effect@@,
+has start_at @@starts_at@@,has end_at @@ends_at@@,has reason @@reason@@;
+update $t has revision @@revision@@;
+fetch { "grant_id":$g.grant_id };

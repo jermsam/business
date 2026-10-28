@@ -1,0 +1,21 @@
+match
+$actor isa person, has identity_id @@identity_id@@;
+$t isa tenant, has tenant_id @@tenant_id@@;
+let $now=request_now();
+let $admin=request_manage($t); $admin==true;
+$target isa identity,has identity_id @@target_id@@;
+let $member=request_grantee($target);$member==true;
+$r isa resource,has resource_id @@resource_id@@,has status "active";
+(tenant:$t,resource:$r) isa resource_ownership;
+$v isa policy_revision,has revision_id @@revision_id@@,has required_role $role_attribute;
+let $role=$role_attribute;
+let $eligible=request_role($target,$role);$eligible==true;
+$p isa access_policy,has status "active";
+(policy:$p,version:$v) isa policy_version;
+(tenant:$t,policy:$p) isa policy_ownership;
+(version:$v,resource:$r) isa policy_scope,has permission_level @@permission@@;
+select $t,$actor,$target,$r,$v; distinct;
+put $g isa policy_access_grant,links(tenant:$t,grantee:$target,resource:$r,grantor:$actor,policy_version:$v),
+has grant_id @@grant_id@@,has permission_level @@permission@@,has effect "allow",has start_at @@starts_at@@;
+update $t has revision @@revision@@;
+fetch { "grant_id":$g.grant_id };
