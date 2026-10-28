@@ -6,6 +6,7 @@ use typedb_driver::{Transaction, TransactionType, TypeDBDriver};
 pub const SCHEMA: &str = include_str!("schema.tql");
 pub const FUNCTIONS: &str = include_str!("functions.tql");
 pub const SCHEMA_POLICY: &str = include_str!("schema-policy.tql");
+pub const ACCOUNT_LINKS: &str = include_str!("account_links.tql");
 pub const BILLING: &str = include_str!("billing.tql");
 pub async fn documents(tx: &Transaction, query: &str) -> Result<Vec<Value>> {
     let mut stream = tx.query(query).await?.into_documents();
@@ -42,7 +43,7 @@ pub async fn install(driver: &TypeDBDriver, name: &str) -> Result<()> {
     driver.databases().create(name).await?;
     // On failure leave this exact new target for inspection, never delete a database implicitly.
     let tx = driver.transaction(name, TransactionType::Schema).await?;
-    for source in [SCHEMA, FUNCTIONS, SCHEMA_POLICY, BILLING] {
+    for source in [SCHEMA, FUNCTIONS, SCHEMA_POLICY, BILLING, ACCOUNT_LINKS] {
         tx.query(source).await?;
     }
     tx.commit().await?;

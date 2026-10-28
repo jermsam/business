@@ -18,8 +18,9 @@ Human first. Simple first. Local first.
 The backend exposes authentication, protected data queries and provider proxies.
 An opt-in server-owned billing worker now executes the canonical billing graph;
 see **Billing execution** below. Provider proxies remain transport-only. Removed
-onboarding/recovery/payment-demo routes, store checkout coordination and Gelato
-fulfillment have not been restored.
+payment-demo routes, store checkout coordination and Gelato fulfillment have not
+been restored. Invitations and recovery now use the canonical identity model;
+see **Sandbox invitations and password resets** below.
 
 ## Provisioning and launch
 
@@ -434,6 +435,40 @@ but are not selected as billing executors. A read-only Mercury connection does
 not prevent a writable Stripe test connection from starting the worker. Mode
 mismatches on writable connections still fail startup. No permission is expanded.
 
-The legacy website portal still requires adaptation to the canonical data-query
-contract and an explicit account migration or fresh sandbox provisioning. Backend
-health and provider workflow tests alone do not establish website acceptance.
+The portal now adapts billing reads/writes to protected canonical data queries.
+The approved sandbox accounts were migrated from `business_dev` without changing
+the source database. Imported unfinished schedules are paused, payment consent is
+cleared, and historical invoices are excluded from charging and notifications.
+Backend health alone does not establish website acceptance.
+
+
+### Sandbox invitations and password resets
+
+Install the additive `account_links.tql` schema explicitly with
+`BUSINESS_ENV_FILE=/private/development-operator.env cargo run --locked --bin install_account_links`.
+This command only targets `business_native_dev`; startup never migrates data.
+Merchant owners invite, renew or revoke through authenticated `/portal` actions.
+Acceptance (`POST /onboarding`) and reset (`POST /recovery`) require the gateway
+secret and are rate limited at the website. Password work has a separate bounded
+admission budget. These handlers reject live provider mode.
+
+Only SHA-256 digests of random invitation/reset tokens are stored. Invitations
+expire in 48 hours; reset links expire in 30 minutes. Renewal/revocation changes
+the buyer's invitation revision, so older links fail. Acceptance consumes the
+link atomically with membership creation. Existing identities must supply their
+existing password; an invitation cannot overwrite it. Reset consumes its link
+and changes the credential version atomically, revoking existing sessions and
+other outstanding reset links. Passwords use bcrypt. Reset requests return the
+same message for known and unknown addresses, with a five-minute email cooldown.
+
+Mail requires `BILLING_MAIL_ENABLED=true`, the existing Resend configuration, and
+an exact recipient in `INVITATION_TEST_EMAILS` (comma-separated), falling back to
+`BILLING_TEST_EMAIL`. All messages are marked TEST. Links point to
+`https://jitpomi.com/account/`; the Cloudflare team gate stays in place. Mail
+failure is explicit to the inviting owner; reset requests preserve the generic
+response. A replacement invitation can be sent after checking the inbox.
+
+The disposable database workflow also tests acceptance, renewal, revocation,
+expiry, existing-identity protection, gateway access, tenant boundaries,
+concurrent reset consumption and old-session invalidation. It never resets an
+existing user's password.

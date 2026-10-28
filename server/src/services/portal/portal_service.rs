@@ -109,6 +109,11 @@ impl DogService<Value, BusinessParams> for PortalService {
         let actor = schema::actor(ctx, &params)?;
         let e = self.engine()?;
         let action = schema::field(&data, "action")?;
+        if matches!(action, "invite" | "renew_invite" | "revoke_invite") {
+            ensure!(ctx.tenant_id.0 == e.merchant, "Merchant account required");
+            let scope=format!("$viewer isa person,has identity_id {};let $owner=role_at_least($viewer,$t,\"owner\",{});$owner==true;",quoted(&actor),now());
+            return e.invitation(&scope, &data).await;
+        }
         if action == "history" || action == "reconcile_invoice" {
             let id = crate::billing::billing_schema::id(schema::field(&data, "invoice_id")?)?;
             let rows=e.read(format!("{} fetch {{'customer':$c.bill_key,'status':$i.bill_status,'amount':$i.bill_amount,'provider':$i.bill_provider,'updated':$i.bill_updated}};",e.invoice_match(&id)?)).await?;

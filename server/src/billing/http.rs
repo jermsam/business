@@ -21,6 +21,7 @@ struct Ingress {
     tick_secret: String,
     webhook_secret: String,
     slots: Arc<tokio::sync::Semaphore>,
+    account_slots: Arc<tokio::sync::Semaphore>,
 }
 fn configured(engine: Engine) -> Result<Ingress> {
     let tick_secret = std::env::var("BILLING_TICK_SECRET")?;
@@ -34,12 +35,15 @@ fn configured(engine: Engine) -> Result<Ingress> {
         tick_secret,
         webhook_secret,
         slots: Arc::new(tokio::sync::Semaphore::new(1)),
+        account_slots: Arc::new(tokio::sync::Semaphore::new(4)),
     })
 }
 fn routes(state: Ingress) -> Router {
     Router::new()
         .route("/internal/billing/tick", post(tick))
         .route("/webhooks/stripe", post(webhook))
+        .route("/onboarding", post(accept_invitation))
+        .route("/recovery", post(recover_account))
         .layer(DefaultBodyLimit::max(64 * 1024))
         .with_state(state)
 }
@@ -168,3 +172,72 @@ pub use super::signature::verify_signature;
 #[cfg(test)]
 #[path = "../../tests/billing/http.rs"]
 mod tests;
+
+async fn account_action(
+    state: Ingress,
+    headers: HeaderMap,
+    data: Value,
+    kind: &str,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let secret = std::env::var("BUSINESS_GATEWAY_SECRET")
+        .or_else(|_| std::env::var("PORTAL_ORIGIN_SECRET"))
+        .unwrap_or_default();
+    let received = headers
+        .get("x-gateway-secret")
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+    if secret.len() < 32 || !bool::from(secret.as_bytes().ct_eq(received.as_bytes())) {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"message":"Please use the account website."})),
+        ));
+    }
+    // Bound expensive password work independently of the billing worker.
+    let _slot = state.account_slots.try_acquire().map_err(|_| {
+        (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"message":"Please wait a moment and try again."})),
+        )
+    })?;
+    // Gateway has per-IP limits; the DB additionally limits reset mail per account.
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(40),
+        state.engine.public_account_action(kind, &data),
+    )
+    .await;
+    match result {
+        Ok(Ok(value)) => Ok(Json(value)),
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            Json(
+                json!({"message":"We couldn’t use that link. Check your details or request a new link."}),
+            ),
+        )),
+    }
+}
+async fn accept_invitation(
+    State(state): State<Ingress>,
+    headers: HeaderMap,
+    Json(data): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if data["action"] != "accept" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"message":"Action unavailable"})),
+        ));
+    }
+    account_action(state, headers, data, "invite").await
+}
+async fn recover_account(
+    State(state): State<Ingress>,
+    headers: HeaderMap,
+    Json(data): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if data["action"] != "request" && data["action"] != "reset" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"message":"Action unavailable"})),
+        ));
+    }
+    account_action(state, headers, data, "reset").await
+}
