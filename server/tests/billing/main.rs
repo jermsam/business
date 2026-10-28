@@ -1,4 +1,5 @@
 //! Explicitly gated real sandbox workflow. No configured database is changed.
+mod portal;
 use anyhow::{ensure, Context, Result};
 use serde_json::json;
 use server::{
@@ -156,6 +157,7 @@ async fn scheduled_payment_receipt_and_decline_reminder() -> Result<()> {
         let archive_tick=engine.tick().await?;
         ensure!(archive_tick["issued"]==0 && archive_tick["reconciled"]==0 && archive_tick["notices"]==0 && archive_tick["errors"]==0,"Imported invoice was processed");
         ensure!(engine.notify_invoice(archived).await?==0,"Imported invoice produced a notice");
+        portal::check(&engine).await?;
         let report=json!({"test":"current-backend-full-sandbox-billing","tick":tick,"repeat_tick":again,"invoices":evidence,"security_checks":["tenant isolation","provider binding","consent revocation","paused schedule","unsigned webhook denied","wrong environment denied","wrong Connect account denied","signed webhook replay"]});
         if let Ok(path)=std::env::var("BILLING_TEST_REPORT") { std::fs::write(path,serde_json::to_string_pretty(&report)?)?; }
         println!("Verified: two scheduled invoices, successful payment + receipt, declined payment + reminder, repeated tick with no duplicate effects.");

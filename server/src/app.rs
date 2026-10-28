@@ -59,6 +59,7 @@ pub fn router(http: DogHttpService<Value, BusinessParams>) -> axum::Router {
     axum::Router::new()
         .route_service("/authentication", endpoint(http.clone()))
         .route_service("/data", endpoint(http.clone()))
+        .route_service("/portal", endpoint(http.clone()))
         .merge(crate::mercury::router(http.clone()))
         .merge(crate::stripe::router(http))
         .route_layer(axum::middleware::from_fn(crate::admission::guard))

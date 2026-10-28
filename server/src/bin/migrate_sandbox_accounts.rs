@@ -68,6 +68,35 @@ async fn run() -> Result<()> {
     .await?
     .is_empty()
     {
+        let copied=documents(&check,"match $p isa person,has credential_version \"migration-v1\";fetch {'id':$p.identity_id,'hash':$p.password_hash};").await?;
+        let source = d.transaction(SOURCE, TransactionType::Read).await?;
+        for person in &copied {
+            let original = documents(
+                &source,
+                &format!(
+                    "match $u isa user,has biz_id {};fetch {{'hash':$u.password}};",
+                    q(s(person, "id")?)
+                ),
+            )
+            .await?;
+            ensure!(
+                original.len() == 1 && original[0]["hash"] == person["hash"],
+                "Password preservation check failed"
+            );
+        }
+        let accounts=documents(&check,r#"match $p isa person;{ $p has email "dev@jitpomi.com"; } or { $p has email "ssali@jitpomi.com"; }; (tenant:$t,member:$p) isa membership,has membership_role "owner";fetch {"email":$p.email,"tenant":$t.tenant_id};"#).await?;
+        ensure!(
+            accounts
+                .iter()
+                .any(|a| a["email"] == "dev@jitpomi.com" && a["tenant"] == NEW),
+            "Admin membership missing"
+        );
+        ensure!(
+            accounts.iter().any(|a| a["email"] == "ssali@jitpomi.com"
+                && a["tenant"] == "14e34eaf-01d4-44af-a153-a19a4017870c"),
+            "Customer membership missing"
+        );
+        println!("Verified {} copied password hashes against the unchanged source; admin and customer memberships present.",copied.len());
         println!("Migration already committed; no changes made.");
         return Ok(());
     }
