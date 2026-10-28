@@ -9,6 +9,10 @@ impl Engine {
         if std::env::var("BILLING_MAIL_ENABLED").as_deref() != Ok("true") {
             return Ok(0);
         }
+        let archived = self.read(format!(r#"{} (invoice:$i,notice:$archive) isa bill_notice_owner;$archive has bill_status "imported-history";fetch {{"id":$i.bill_key}};"#,self.invoice_match(id)?)).await?;
+        if !archived.is_empty() {
+            return Ok(0);
+        }
         // Fresh provider state avoids reminders based only on an old local observation.
         self.reconcile(id).await?;
         let rows=self.read(format!(r#"{} fetch {{"email":$c.bill_email,"description":$i.name,"amount":$i.bill_amount,"due":$i.bill_next,"status":$i.bill_status,"provider":$i.bill_provider,"url":$i.bill_url}};"#,self.invoice_match(id)?)).await?;
@@ -91,7 +95,7 @@ impl Engine {
         Ok((sent, errors))
     }
     pub async fn notification_candidates(&self) -> Result<Vec<serde_json::Value>> {
-        let rows=self.read(format!(r#"{} (merchant:$t,customer:$c) isa bill_account;(customer:$c,plan:$p) isa bill_plan_owner;(plan:$p,invoice:$i) isa bill_invoice_owner;
+        let rows=self.read(format!(r#"{} (merchant:$t,customer:$c) isa bill_account;(customer:$c,plan:$p) isa bill_plan_owner;(plan:$p,invoice:$i) isa bill_invoice_owner;not {{(invoice:$i,notice:$archive) isa bill_notice_owner;$archive has bill_status "imported-history";}};
   {{$i has bill_status "open";}} or {{$i has bill_status "paid";not {{(invoice:$i,notice:$n) isa bill_notice_owner;$n has bill_key $key;$i has bill_key $id;let $receipt=$id+"-receipt";$key==$receipt;}};}};
   $i has bill_updated $updated;select $i,$updated;distinct;sort $updated;limit 20;fetch {{"id":$i.bill_key}};"#,self.prefix())).await?;
         Ok(rows)

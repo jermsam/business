@@ -150,6 +150,12 @@ async fn scheduled_payment_receipt_and_decline_reminder() -> Result<()> {
             ensure!(response.status().as_u16()==expected,"Unexpected webhook response {}",response.status());
         }
         ensure!(engine.notify_invoice(paid["id"].as_str().unwrap()).await?==0,"Webhook replay duplicated receipt");
+        // Imported historical invoices must never re-enter issuing, collection or notice delivery.
+        let archived=evidence.iter().find(|r|r["status"]=="open").unwrap()["id"].as_str().unwrap();
+        engine.write(format!(r#"{} select $t,$i;distinct;update $i has bill_status "queued";insert $n isa bill_notice,has bill_key "{archived}-migration-archive",has bill_status "imported-history",has bill_updated {now};(invoice:$i,notice:$n) isa bill_notice_owner;fetch {{"id":$n.bill_key}};"#,engine.invoice_match(archived)?)).await?;
+        let archive_tick=engine.tick().await?;
+        ensure!(archive_tick["issued"]==0 && archive_tick["reconciled"]==0 && archive_tick["notices"]==0 && archive_tick["errors"]==0,"Imported invoice was processed");
+        ensure!(engine.notify_invoice(archived).await?==0,"Imported invoice produced a notice");
         let report=json!({"test":"current-backend-full-sandbox-billing","tick":tick,"repeat_tick":again,"invoices":evidence,"security_checks":["tenant isolation","provider binding","consent revocation","paused schedule","unsigned webhook denied","wrong environment denied","wrong Connect account denied","signed webhook replay"]});
         if let Ok(path)=std::env::var("BILLING_TEST_REPORT") { std::fs::write(path,serde_json::to_string_pretty(&report)?)?; }
         println!("Verified: two scheduled invoices, successful payment + receipt, declined payment + reminder, repeated tick with no duplicate effects.");
