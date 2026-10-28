@@ -4,6 +4,7 @@ Tests are separate from source, following the DogRS/sp-connector service layout.
 
 - `backend/`: real TypeDB policy and main-server HTTP tests, plus executable provisioning/bootstrap/login/data/logout acceptance. Uses the same app composition as production; no alternate server.
 - `mercury/`, `stripe/`: registered resource/auth hooks, tenant boundaries, HTTP transport and separately gated real sandbox checks.
+- `billing/`: canonical scheduler and real sandbox payment/receipt/reminder acceptance (explicitly gated); source-adjacent tests are linked from this directory.
 - `unit/`: current configuration, database-tool validation, token keys, admission and data envelopes.
 - `frontend/`: the actual frontend TypeQL client and binding contracts.
 - `layout/`: every Rust source/test must be reachable from a Cargo target,

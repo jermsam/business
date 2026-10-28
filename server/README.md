@@ -15,12 +15,11 @@ Human first. Simple first. Local first.
 - `src/database.rs` and the `database` CLI handle explicit provisioning. Startup verifies the canonical model and never migrates, seeds or wipes data.
 - Tests live under `tests/`; no dormant test files for removed services are presented as coverage.
 
-The current backend exposes authentication, protected data queries and provider proxies.
-It does **not** expose the removed billing/onboarding/recovery/payment-demo routes.
-Recurring collection, email delivery, store checkout coordination, webhook ingestion
-and Gelato fulfillment are not implemented by these proxies. No obsolete queue
-worker or sandbox generator is kept to imply otherwise. The protected billing
-graph is available through data queries; it is not an automatic collection engine.
+The backend exposes authentication, protected data queries and provider proxies.
+An opt-in server-owned billing worker now executes the canonical billing graph;
+see **Billing execution** below. Provider proxies remain transport-only. Removed
+onboarding/recovery/payment-demo routes, store checkout coordination and Gelato
+fulfillment have not been restored.
 
 ## Provisioning and launch
 
@@ -331,3 +330,89 @@ durable TypeDB token store. Set `BUSINESS_ENV_FILE` to an owner-readable file
 outside the project. The prepared configurations are in
 `~/.config/jitpomi/business/dev.env` and `prod.env`. Their credentials must not be
 committed or pasted into logs. Use a dedicated non-admin runtime account.
+
+## Billing execution
+
+`src/billing/` schedules invoices, reconciles provider status, attempts authorized
+Stripe payments, verifies Stripe webhooks, and delivers invoice/receipt/reminder
+emails through Resend. It uses the current `tenant`/`bill_account` graph, not the
+removed company/workspace model. Frontend reads and permitted plan changes still
+use protected `/data`; private provider identifiers and consent remain hidden.
+This change does not restore the old portal's onboarding or saved-card endpoints.
+
+Enable explicitly with `BILLING_ENABLED=true`, `BILLING_MERCHANT_ID` (tenant UUID)
+and `BILLING_TICK_SECRET` (32+ characters). The executable runs a bounded pass every
+60 seconds. One worker instance handles one explicitly configured merchant; other
+tenants are not swept. Use a separate worker configuration for another merchant.
+Provider credentials are selected from that tenant's existing
+`STRIPE_CONNECTIONS_JSON` / `MERCURY_CONNECTIONS_JSON`; write permission and matching
+environment are required. A configured Stripe Connect account is applied to all
+Stripe requests and checked on incoming events. Global legacy provider keys are
+not used by the engine.
+
+- `POST /internal/billing/tick`: bearer tick secret; no tenant header can change
+  its merchant. A pass is bounded to ten new occurrences, ten issuance attempts,
+  twenty reconciliations and twenty notification candidates.
+- `POST /webhooks/stripe`: raw-body signature verification with a five-minute
+  timestamp tolerance and the configured `STRIPE_WEBHOOK_SECRET`. The event only
+  prompts a fresh provider read. Stored invoice ID, merchant ownership, customer,
+  amount, currency, metadata and environment must agree. Repeated events cannot
+  undo a paid/void state or initiate a charge. Receipts are picked up by the worker.
+- `BILLING_MAIL_ENABLED=true` enables email with `RESEND_API_KEY` and
+  `BILLING_EMAIL_FROM`. Sandbox delivery requires an exact `BILLING_TEST_EMAIL`
+  match and is marked TEST. Mercury invoice creation uses `DontSend`, so this same
+  delivery policy also governs its invoice emails. `BILLING_MERCURY_DESTINATION`
+  selects that merchant's deposit account.
+
+Amounts are integer USD cents. Weekly/monthly/yearly schedules use UTC and retain
+the original anchor (January 31 → February 28 → March 31). One-time plans finish
+once. Schedule advancement and invoice insertion commit together. Tenant revision
+writes arbitrate overlapping workers; every mutation requires exactly one result
+before commit. A changed/missing consent revision, manual customer choice, manual
+merchant policy or paused plan prevents automatic collection. Admin preference
+alone never grants consent.
+
+Stripe auto-advance is off. The worker makes at most one off-session attempt per
+invoice, after a durable claim, using a stable idempotency key. Declines leave a
+payment link for the customer. Processing bank payments receive no pay-again
+reminder. Open due invoices can receive at most four reminder windows, separated
+by `BILLING_REMINDER_DAYS` (1–30, default 7). A paid invoice gets one receipt.
+Resend acceptance is recorded with its message ID; acceptance is not itself proof
+of inbox delivery.
+
+### Uncertain outcomes and operations
+
+Do not reset durable claims to retry blindly. An `issuing`/`attention` invoice with
+no external ID needs provider-side lookup by `business_invoice` metadata (Stripe)
+or `JIT-<invoice UUID>` (Mercury). A known draft needs operator reconciliation
+before finalization; the worker does not recreate it. A Mercury customer marked
+`pending` similarly needs reconciliation because customer creation has no assumed
+idempotency contract. A notice in `sending` or `attention` must be checked with
+Resend before any re-send. These states deliberately stop ambiguous external
+side effects. They are not automatically repaired by restarting the worker.
+
+Keep the old remote scheduler disabled before any cutover, reconcile outstanding
+provider records, and configure the new worker against a verified canonical
+database. Startup does not migrate data, configure a remote webhook, or enable
+live payments. Mercury's restored sandbox connection still needs its hosted card
+checkout checked separately; Stripe test acceptance does not certify Mercury.
+
+### Sandbox workflow acceptance
+
+Run the explicitly ignored `scheduled_payment_receipt_and_decline_reminder` test
+in `tests/billing/main.rs` with `BUSINESS_ENV_FILE` (development operator source,
+`TYPEDB_DB=business_dev`) and `BILLING_TEST_ENV` (protected Stripe test key and
+approved Resend test configuration). It creates/deletes only a new
+`business_backend_test_<UUID>` database. Optional `BILLING_TEST_REPORT` writes
+non-secret evidence. Plaintext TypeDB is permitted only for loopback test
+instances; normal runtime continues requiring TLS. The provider fixtures are
+synthetic and remain in Stripe sandbox for inspection.
+
+```sh
+cargo test --locked --test billing -- --ignored --nocapture --test-threads=1
+```
+
+This test actually pays a $1 sandbox invoice, declines another, verifies the
+receipt/reminder records, and checks repeated ticks, concurrent scheduling,
+revoked consent, paused plans, provider binding, tenant isolation and signed
+webhook replay. It sends clearly marked test emails only to dev@jitpomi.com.
