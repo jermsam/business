@@ -95,6 +95,16 @@ async fn canonical_tools_and_server_end_to_end() -> Result<()> {
             .json(&json!({"strategy":"local","email":" OWNER@EXAMPLE.INVALID ","password":"acceptance-owner-password"})).send().await?;
         ensure!(response.status().is_success(),"Canonical owner login failed");
         let login:Value=response.json().await?;ensure!(login["user"]["id"]==identity&&login["user"].get("password").is_none(),"Invalid owner identity or password leak");
+        let account=client.post(format!("{base}/authentication")).header("x-gateway-secret",gateway).header("x-tenant-id","account")
+            .json(&json!({"strategy":"account","email":" OWNER@EXAMPLE.INVALID ","password":"acceptance-owner-password"})).send().await?;
+        ensure!(account.status().is_success(),"Email-only account login failed");
+        let discovered:Value=account.json().await?;
+        ensure!(discovered["user"]["tenant_id"]==tenant && discovered["user"]["id"]==identity && discovered["user"].get("password").is_none(),"Unsafe account discovery");
+        for email in ["owner@example.invalid","missing@example.invalid"] {
+            let denied=client.post(format!("{base}/authentication")).header("x-gateway-secret",gateway).header("x-tenant-id","account")
+              .json(&json!({"strategy":"account","email":email,"password":"wrong-password"})).send().await?;
+            ensure!(denied.status()==401,"Account discovery leaked unauthorized access");
+        }
         let token=login["accessToken"].as_str().unwrap();
         let template=include_str!("../../public/queries/data/create-resource.tql");
         let query=template.replace("@@identity_id@@",&json!(identity).to_string()).replace("@@tenant_id@@",&json!(tenant).to_string()).replace("@@resource_id@@","\"tool-resource\"").replace("@@name@@","\"Tool resource\"").replace("@@revision@@","\"tool-revision\"");

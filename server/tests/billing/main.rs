@@ -27,7 +27,7 @@ async fn scheduled_payment_receipt_and_decline_reminder() -> Result<()> {
     let merchant = uuid::Uuid::new_v4().to_string();
     std::env::set_var("BILLING_MERCHANT_ID", &merchant);
     std::env::set_var("BILLING_LIVE", "false");
-    std::env::set_var("MERCURY_CONNECTIONS_JSON", "[]");
+    std::env::set_var("MERCURY_CONNECTIONS_JSON", json!([{"tenant_id":merchant,"identity_ids":["sandbox-fixture"],"environment":"sandbox","token":"readonly-fixture-never-sent","write":false}]).to_string());
     std::env::set_var("STRIPE_CONNECTIONS_JSON", json!([{"tenant_id":merchant,"identity_ids":["sandbox-fixture"],"environment":"test","token":token,"write":true}]).to_string());
     for key in ["RESEND_API_KEY", "BILLING_EMAIL_FROM", "BILLING_TEST_EMAIL"] {
         std::env::set_var(
@@ -65,6 +65,10 @@ async fn scheduled_payment_receipt_and_decline_reminder() -> Result<()> {
         database: name.clone(),
     });
     let engine = Engine::configured(state)?;
+    ensure!(
+        engine.providers.ready(Provider::Mercury).is_err(),
+        "Read-only Mercury connection became writable"
+    );
     let outcome=async {
         let now=chrono::Utc::now().timestamp();
         let tx=driver.transaction(&name,TransactionType::Write).await?;

@@ -58,6 +58,10 @@ deployment action; removing its source does not disable a remote cron job.
 
 Use `Authorization: Bearer <token>` and `x-tenant-id` on protected calls.
 Local sign-in is POST `/authentication` with strategy `local`, email and password.
+For an email-only portal, strategy `account` privately discovers an active tenant
+membership and verifies the same password before returning its tenant ID. No
+company or identity information is returned for failed sign-ins. Explicit tenant
+sign-in and fresh membership checks on protected calls remain unchanged.
 DELETE `/authentication` revokes the supplied token durably.
 
 POST `/data` with `x-service-method: read` or `write` and only
@@ -416,3 +420,20 @@ This test actually pays a $1 sandbox invoice, declines another, verifies the
 receipt/reminder records, and checks repeated ticks, concurrent scheduling,
 revoked consent, paused plans, provider binding, tenant isolation and signed
 webhook replay. It sends clearly marked test emails only to dev@jitpomi.com.
+
+### Sandbox deployment recovery — October 27, 2026
+
+The free TypeDB Cloud validation cluster had automatically paused. Resuming the
+existing cluster restored connectivity without changing its address, credentials
+or stored data. `business_native_dev` passes canonical schema verification.
+The deployed billing merchant must match the tenant in that database and the
+provider connection configuration; legacy company IDs are not interchangeable.
+
+Read-only provider connections remain available to authenticated provider reads,
+but are not selected as billing executors. A read-only Mercury connection does
+not prevent a writable Stripe test connection from starting the worker. Mode
+mismatches on writable connections still fail startup. No permission is expanded.
+
+The legacy website portal still requires adaptation to the canonical data-query
+contract and an explicit account migration or fresh sandbox provisioning. Backend
+health and provider workflow tests alone do not establish website acceptance.

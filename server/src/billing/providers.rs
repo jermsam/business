@@ -23,8 +23,15 @@ impl Providers {
         )?;
         stripe::validate_connections(&stripes)?;
         mercury::validate_connections(&mercuries)?;
-        let stripe = stripes.into_iter().find(|c| c.tenant_id == merchant);
-        let mercury = mercuries.into_iter().find(|c| c.tenant_id == merchant);
+        // Read-only proxy connections are not billing executors. Keep them
+        // available to the provider API without preventing another writable
+        // provider from starting the billing worker.
+        let stripe = stripes
+            .into_iter()
+            .find(|c| c.tenant_id == merchant && c.write);
+        let mercury = mercuries
+            .into_iter()
+            .find(|c| c.tenant_id == merchant && c.write);
         let live = std::env::var("BILLING_LIVE").as_deref() == Ok("true");
         if let Some(c) = &stripe {
             ensure!(

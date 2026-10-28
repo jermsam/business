@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 struct Resolver {
     adapter: TypeDBAdapter,
+    discover: bool,
 }
 impl Resolver {
     async fn lookup(&self, attribute: &str, value: &str, tenant: &str) -> Result<Option<Value>> {
@@ -53,12 +54,30 @@ impl LocalEntityResolver<BusinessParams> for Resolver {
         email: &str,
         ctx: &mut HookContext<Value, BusinessParams>,
     ) -> Result<Option<Value>> {
-        self.lookup(
-            "email",
-            &email.trim().to_ascii_lowercase(),
-            &ctx.tenant.tenant_id.0,
-        )
-        .await
+        let email = email.trim().to_ascii_lowercase();
+        if !self.discover {
+            return self.lookup("email", &email, &ctx.tenant.tenant_id.0).await;
+        }
+        // Account sign-in discovers a membership privately. The local strategy
+        // verifies the password before returning any identity or company details.
+        let query = format!(
+            r#"match
+            $i isa person, has email {}, has identity_id $id;
+            $t isa tenant, has tenant_id $tenant;
+            let $active=active_member($i,$t,{}); $active==true;
+            select $i,$t,$id,$tenant; distinct; sort $tenant; limit 1;
+            fetch {{"id":$id,"tenant_id":$tenant,"email":$i.email,
+              "password":$i.password_hash,"credential_version":$i.credential_version}};"#,
+            serde_json::to_string(&email)?,
+            now()
+        );
+        let response = self.adapter.read(json!({"query":query})).await?;
+        let rows = response
+            .pointer("/ok/answers")
+            .and_then(Value::as_array)
+            .ok_or_else(|| anyhow::anyhow!("Invalid credential result"))?;
+        ensure!(rows.len() <= 1, "Ambiguous credential identity");
+        Ok(rows.first().map(|r| r["data"].clone()))
     }
 }
 struct Local(LocalStrategy<BusinessParams>);
@@ -122,7 +141,11 @@ pub fn strategies(
     state: Arc<TypeDBState>,
 ) -> Result<Arc<dog_auth::AuthServiceAdapter<BusinessParams>>> {
     let mut opts = AuthOptions {
-        strategies: vec![AuthStrategy::Jwt, AuthStrategy::Custom("local".into())],
+        strategies: vec![
+            AuthStrategy::Jwt,
+            AuthStrategy::Custom("local".into()),
+            AuthStrategy::Custom("account".into()),
+        ],
         ..Default::default()
     };
     opts.jwt.secret = builder.get("auth.jwt.secret");
@@ -135,6 +158,16 @@ pub fn strategies(
         Arc::new(Local(LocalStrategy::new().with_entity_resolver(Arc::new(
             Resolver {
                 adapter: TypeDBAdapter::new(state.clone()),
+                discover: false,
+            },
+        )))),
+    );
+    auth.register(
+        "account",
+        Arc::new(Local(LocalStrategy::new().with_entity_resolver(Arc::new(
+            Resolver {
+                adapter: TypeDBAdapter::new(state.clone()),
+                discover: true,
             },
         )))),
     );
@@ -144,6 +177,7 @@ pub fn strategies(
             inner: JwtStrategy::new(),
             resolver: Resolver {
                 adapter: TypeDBAdapter::new(state),
+                discover: false,
             },
         }),
     );
